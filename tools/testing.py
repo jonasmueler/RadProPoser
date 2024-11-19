@@ -67,6 +67,28 @@ def testSeq(combination: list[str], # part, ang, act, rec
             device: str = TRAINCONFIG["device"], 
             keypointsFlag: bool = False, 
             returnPreds: bool = False) -> torch.Tensor:
+    """
+    Evaluate a sequence of radar data using a specified model to predict keypoints 
+    and compute error metrics.
+
+    Parameters:
+    - combination (list[str]): A list of identifiers that specify the part, angle, 
+      activity, and recording to locate the corresponding radar and skeleton data.
+    - rootPath (str): The root directory path containing radar and skeleton data files.
+    - model (nn.Module): The PyTorch model used to predict keypoints from radar data.
+    - seqLen (int, optional): The sequence length to use for predictions. Defaults to SEQLEN.
+    - device (str, optional): The device (e.g., 'cuda' or 'cpu') for computation. Defaults to TRAINCONFIG["device"].
+    - keypointsFlag (bool, optional): Flag to indicate whether to use specific keypoint-based error metrics. Defaults to False.
+    - returnPreds (bool, optional): If True, return predictions along with error metrics. Defaults to False.
+
+    Returns:
+    - torch.Tensor: If returnPreds is False, returns a tuple (error, std, sigmas) where:
+        - error: Mean Per Joint Position Error (MPJPE) between predicted and ground truth keypoints.
+        - std: Standard deviation of errors.
+        - sigmas: Learned variance estimates from the model.
+      If returnPreds is True, also returns:
+        - preds: Predicted keypoints.
+    """
     
     # get radar data
     path = os.path.join(rootPath, "radar",  "data_cube_parsed" + "_" + combination[0] + "_" + combination[1]  +  "_" + combination[2]+ "_" + combination[3] + ".npz")
@@ -118,6 +140,22 @@ def testLoss(testSetList: list[list[str]],
              rootPath: str, 
              model: nn.Module,
              keypointsFlag: bool) -> float:
+    """
+    Calculate the average test loss, standard deviation, and learned variances over a test dataset.
+
+    Parameters:
+    - testSetList (list[list[str]]): A list of combinations, where each combination specifies the 
+      part, angle, activity, and recording for locating the corresponding radar and skeleton data.
+    - rootPath (str): The root directory path containing radar and skeleton data files.
+    - model (nn.Module): The PyTorch model used for predicting keypoints from radar data.
+    - keypointsFlag (bool): Flag to indicate whether to use specific keypoint-based error metrics.
+
+    Returns:
+    - float: Returns a tuple (error, std, sigmas) where:
+        - error: The mean of the Mean Per Joint Position Errors (MPJPE) across all test sequences.
+        - std: The mean of the standard deviations of errors across all test sequences.
+        - sigmas: The mean of the learned variances across all test sequences.
+    """
     
     losses = []
     stds = []

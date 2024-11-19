@@ -462,11 +462,36 @@ class RadProPoser(nn.Module):
 
         return features
     
-    def sampleLatent(self, mu: torch.Tensor, sigma: torch.Tensor, alpha: float = None)->torch.Tensor:
+    def sampleLatent(self, 
+                     mu: torch.Tensor, 
+                     sigma: torch.Tensor, 
+                     alpha: float = None)->torch.Tensor:
         if alpha != None:
             self.varianceScaling = torch.tensor(alpha)
         out = self.sample(mu, sigma)
         return out
+    
+    def getLatent(self, x: torch.Tensor)-> tuple[torch.Tensor, torch.Tensor]:
+        # fft layer 
+        x = self.preProcess(x) # watch out with batch = 1
+        device = x.device
+
+        # part in real and imag
+        xComp = [x.real, x.imag]
+        spatFeat = []
+        for elmt in xComp:
+            for i in range(elmt.size(1)):
+                helper = self.applyBackbone(elmt[:,i].float())
+                spatFeat.append(helper)
+        
+        # fuse together to get mu and sgm
+        spatiotemp = torch.cat(spatFeat, dim = 1)
+
+        # get latent 
+        mu = self.mu(spatiotemp)
+        sigma = self.sigma(spatiotemp)
+        
+        return mu, sigma
 
     def forward(self, 
                 x: torch.Tensor):

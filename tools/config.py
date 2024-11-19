@@ -2,6 +2,7 @@
 SEQLEN = 8
 MODELNAME = "RadProPoser"
 
+############################################### HPE #######################################################################
 ## model paramas
 #RadProPoser
 # define hyperparameters
@@ -50,10 +51,17 @@ TRAINCONFIG = {"learningRate": 0.0001,
           }
 """
 
+############################################################## Activity Classification #########################################################
+CLASSIFIERCONFIG = {"batch_size": 32, 
+                    "learning_rate": 0.0001, 
+                    "num_epochs": 5000, 
+                    "device": "cpu"
+          }
 
 # paths
-MODELPATH = "/home/jonas/CVPR2025/code/codeFinal/models"
-MODELCKTPT = None # path to model for checking
+MODELPATH = "/home/jonas/CVPR2025/code/codeFinal/src/models"
+MODELCKTPT = None # path to model for testing
 PATHORIGIN = "/home/jonas/Dokumente/raw_radar_data"
+PATHLATENT = "/home/jonas/Dokumente"
 
 
