@@ -1,3 +1,5 @@
+import os
+
 ## globals
 SEQLEN = 8
 MODELNAME = "RadProPoser"
@@ -59,9 +61,9 @@ CLASSIFIERCONFIG = {"batch_size": 32,
           }
 
 # paths
-MODELPATH = "/home/jonas/CVPR2025/code/codeFinal/src/models"
-MODELCKTPT = None # path to model for testing
-PATHORIGIN = "/home/jonas/Dokumente/raw_radar_data"
-PATHLATENT = "/home/jonas/Dokumente"
-
-
+PATHORIGIN = None
+MODELPATH = os.path.join(PATHORIGIN, "models")
+PATHLATENT = os.path.join(PATHORIGIN, "data", "latentData")
+PATHRAW = os.path.join(PATHORIGIN, "data", "raw_radar_data")
+ACTIVITYCLASSIFICATIONCKPT = os.path.join(PATHORIGIN, "trainedModels", "activityClassification")
+HPECKPT = os.path.join(PATHORIGIN, "trainedModels", "humanPoseEstimation")

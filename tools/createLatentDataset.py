@@ -126,7 +126,7 @@ def dataGenerator(alphas: np.ndarray,
         for angle in angles:
             for action in actions:
                 for recording in recordings:
-                    path = os.path.join(PATHORIGIN, "radar",  "data_cube_parsed" + "_" + participant + "_" + angle  +  "_" + action+ "_" + recording + ".npz")
+                    path = os.path.join(PATHRAW, "radar",  "data_cube_parsed" + "_" + participant + "_" + angle  +  "_" + action+ "_" + recording + ".npz")
                     if os.path.exists(path):
                         counter += 1
                     trials.append([participant, angle, action, recording])
@@ -137,7 +137,7 @@ def dataGenerator(alphas: np.ndarray,
         combination = trials[i]
 
         # check if file exists 
-        path = os.path.join(PATHORIGIN, "radar",  "data_cube_parsed" + "_" + combination[0] + "_" + combination[1]  +  "_" + combination[2]+ "_" + combination[3] + ".npz")
+        path = os.path.join(PATHRAW, "radar",  "data_cube_parsed" + "_" + combination[0] + "_" + combination[1]  +  "_" + combination[2]+ "_" + combination[3] + ".npz")
         #print(path)
         if os.path.exists(path):
             # get radar 
@@ -145,7 +145,7 @@ def dataGenerator(alphas: np.ndarray,
             radar = data.files[0]
             radar = data[radar]
             
-            radar = torch.from_numpy(radar).to(TRAINCONFIG["device"]).to(torch.complex64)[0:10, ...]
+            radar = torch.from_numpy(radar).to(TRAINCONFIG["device"]).to(torch.complex64) # debug [0:10, ...]
 
             # get prediction
             print("start predicting ", combination)
@@ -195,4 +195,4 @@ def dataGenerator(alphas: np.ndarray,
 if __name__ == "__main__":
     alphas = list(np.linspace(0.0128 - 0.01, 0.0128 + 0.01, 10))
     alphas.append(0.0128)
-    dataGenerator(alphas, 100, True)
+    dataGenerator(alphas, 100, False)

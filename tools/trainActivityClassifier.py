@@ -7,6 +7,27 @@ import os
 from config import *
 import random
 
+def saveCheckpoint(model: nn.Module, 
+                   optimizer: torch.optim.Adam, 
+                   filename: str):
+    """
+    Saves the model and optimizer states to a checkpoint file.
+
+    Args:
+        model (nn.Module): The model whose state needs to be saved.
+        optimizer (torch.optim.Optimizer): The optimizer whose state needs to be saved.
+        filename (str): The name of the file to save the checkpoint to.
+
+    """
+
+    checkpoint = {
+        'model': model.state_dict(),
+        'optimizer': optimizer.state_dict()}
+    torch.save(checkpoint, os.path.join(PATHORIGIN, filename))
+    print("checkpoint saved")
+    return
+
+
 class Dataset(Dataset):
     def __init__(self, mode: str):
         self.data = os.listdir(os.path.join(PATHLATENT, "dataTrain", "X"))
@@ -117,6 +138,9 @@ def trainLoop(model: nn.Module,
             
             valLossFull = valLossFull.detach().cpu().item()/counter
             print("validation loss: ", valLossFull)
+            
+            # save checkpoint
+            saveCheckpoint(model, optimizer, os.path.join(ACTIVITYCLASSIFICATIONCKPT, str(epoch) + ".pth"))
                 
 
 

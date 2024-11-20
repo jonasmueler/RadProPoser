@@ -107,9 +107,10 @@ def nllLoss(gt: torch.Tensor,
     var = torch.clamp(var, min=1e-6)
 
     # Compute the NLL loss
-    loss = ((gt - mu) ** 2 / var).mean() + TRAINCONFIG["gamma"] * var.mean()
+    pen = TRAINCONFIG["gamma"] * var.mean()
+    loss = ((gt - mu) ** 2 / var).mean() + pen
 
-    return loss
+    return loss, pen
 
 def trainLoop(trainLoader: torch.utils.data.DataLoader, 
               valLoader: torch.utils.data.DataLoader, 
@@ -210,7 +211,7 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                 # generator loss
                 preds, mu, logVar, muOut, varOut = model.forward(radar)
                 KLloss = KLLoss(mu, logVar) 
-                nLL = nllLoss(muOut, varOut)
+                nLL, pen = nllLoss(gt, muOut, varOut)
                 loss = nLL + TRAINCONFIG["beta"] * KLloss
 
             else:
@@ -228,7 +229,8 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                 if WandB:
                         wandb.log({"nll": nLL.detach().cpu().item(), 
                                    "KLLoss": KLloss.detach().cpu().item(), 
-                                   "loss": loss.detach().cpu().item()})
+                                   "loss": loss.detach().cpu().item(), 
+                                   "varPenalty": pen.detach().cpu().item()})
             else:
                 if WandB:
                         wandb.log({"MSE": loss.detach().cpu().item()})
@@ -260,11 +262,12 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
 
             if WandB:
                     wandb.log({"valLoss": valLosses.detach().cpu().item()})
+            print("valLoss: ", valLosses.detach().cpu().item())
 
             # save model and optimizer checkpoint
-            path = os.path.join(PATHORIGIN, "trainedModels")
+            path = os.path.join(HPECKPT)
             os.chdir(path)
-            saveCheckpoint(model, optimizer, PATHORIGIN + "/" + "trainedModels/" + modelName + str(b))
+            saveCheckpoint(model, optimizer, os.path.join(path, modelName + str(b)))
 
     ## save model state
     saveCheckpoint(model, optimizer, PATHORIGIN + "/" + "trainedModels/" + modelName + str(b))

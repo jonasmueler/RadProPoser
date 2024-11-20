@@ -131,24 +131,14 @@ class RadarData(Dataset):
         """
         
         # get radar 
-        radar = torch.load(os.path.join(os.path.join(self.rootPath, self.mode, "radar", str(idx) + ".pth")))
+        radar = torch.load(os.path.join(os.path.join(self.rootPath, self.mode, "radar", str(idx) + ".pth")), weights_only=True)
 
         
-        gt = torch.load(os.path.join(os.path.join(self.rootPath, self.mode, "target", str(idx) + ".pth")))
+        gt = torch.load(os.path.join(os.path.join(self.rootPath, self.mode, "target", str(idx) + ".pth")), weights_only=True)
         gt = gt.flatten()
         return radar, gt
     
 
-
-
-if __name__ == "__main__":
-    dataset = RadarData("train", "/home/jonas/Downloads/raw_data", "/home/jonas/Downloads/raw_data", 5)
-    dataLoader = DataLoader(dataset, 2, shuffle = True)
-
-    x, y = next(iter(dataLoader))
-
-    print(x.size())
-    print(y.size())
 
    
 

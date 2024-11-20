@@ -16,9 +16,6 @@ from models import RadProPoser as Encoder
 
 CF = Encoder().to(TRAINCONFIG["device"])
 
-# load weights 
-if MODELCKTPT != None:
-    CF = trainLoop.loadCheckpoint(CF, None, MODELCKTPT)
 
 ## set seed 
 def setSeed(seed: int):
@@ -58,10 +55,10 @@ print(f"Non-trainable parameters: {nonTrainableParams}")
 
 
 # get dataLoaders 
-datasetTrain = dataLoaders.RadarData("train", PATHORIGIN, PATHORIGIN, SEQLEN)
+datasetTrain = dataLoaders.RadarData("train", PATHRAW, PATHRAW, SEQLEN)
 dataTrain = DataLoader(datasetTrain, TRAINCONFIG["batchSize"], shuffle = True, num_workers = 1)
 
-datasetVal = dataLoaders.RadarData("val", PATHORIGIN, PATHORIGIN,  SEQLEN)
+datasetVal = dataLoaders.RadarData("val", PATHRAW, PATHRAW,  SEQLEN)
 dataVal = DataLoader(datasetVal, TRAINCONFIG["batchSize"], shuffle = True, num_workers = 1)
 
 
