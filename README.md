@@ -46,7 +46,7 @@ To get started with the project, follow the steps below:
    ```
 
 4. **Download data**:
-   Our data can be downloaded annonymously here: https://doi.org/10.5281/zenodo.14035103. Place our dataset in the `/data` folder. Refer to `radar_raw_data/README.md` for dataset details.
+   Our data can be downloaded anonymously here: https://doi.org/10.5281/zenodo.14035103. Place our dataset in the `/data` folder. Refer to `radar_raw_data/README.md` for dataset details.
 
 ---
 
