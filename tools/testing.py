@@ -189,7 +189,7 @@ def testingMainKeypoints():
     CF = Encoder().to(TRAINCONFIG["device"])
 
     # load weights 
-    #CF = trainLoop.loadCheckpoint(CF, None, MODELCKTPT)
+    CF = trainLoop.loadCheckpoint(CF, None, os.path.join(HPECKPT, None)) # add trained HPE model name here 
 
     # conditions
     testPart = ["p12", "p2", "p1"]

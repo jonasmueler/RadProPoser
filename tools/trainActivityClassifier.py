@@ -146,8 +146,8 @@ def trainLoop(model: nn.Module,
 
 def main():
     # test model
-    model = Classifier()
-    testD = torch.rand((5, 600, 256))
+    model = Classifier().to(CLASSIFIERCONFIG["device"])
+    testD = torch.rand((5, 600, 256)).to(CLASSIFIERCONFIG["device"])
     print(model(testD).size())
 
     # Dataset and DataLoader
@@ -157,7 +157,6 @@ def main():
     dataloaderVal = DataLoader(datasetVal, batch_size=CLASSIFIERCONFIG["batch_size"], shuffle=True)
 
     # Model, Loss, and Optimizer
-    model = Classifier()
     criterion = nn.CrossEntropyLoss()  # Binary Cross-Entropy Loss
     optimizer = optim.Adam(model.parameters(), lr=CLASSIFIERCONFIG["learning_rate"])
 

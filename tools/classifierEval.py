@@ -103,7 +103,7 @@ def computeMetrics(preds: torch.Tensor, labels: torch.Tensor):
 if __name__ == "__main__":
     # load model 
     model = Classifier()
-    model = loadCheckpoint(model, None, "/home/jonas/CVPR2025/code/codeFinal/src/trainedModels/activityClassification/3.pth")
+    model = loadCheckpoint(model, None, os.path.join(ACTIVITYCLASSIFICATIONCKPT, None)) # add trained classifier model name here
     print("model loaded correctly")
     
     # get data loader 

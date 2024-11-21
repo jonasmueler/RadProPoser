@@ -10,7 +10,7 @@ MODELNAME = "RadProPoser"
 # define hyperparameters
 TRAINCONFIG = {"learningRate": 0.001, 
           "weightDecay": 0.0001,
-          "epochs": 4000, 
+          "epochs": 12, 
           "batchSize": 16, 
           "optimizer": "adam", 
           "device": "cpu", 
@@ -28,7 +28,7 @@ TRAINCONFIG = {"learningRate": 0.001,
 """
 TRAINCONFIG = {"learningRate": 0.0001, 
           "weightDecay": 0.0001,
-          "epochs": 4000, 
+          "epochs": 40, 
           "batchSize": 16, #16 #64 
           "optimizer": "adam", 
           "device": "cuda", 
@@ -43,7 +43,7 @@ TRAINCONFIG = {"learningRate": 0.0001,
 """
 TRAINCONFIG = {"learningRate": 0.0001, 
           "weightDecay": 0.0001,
-          "epochs": 4000, 
+          "epochs": 40, 
           "batchSize": 16, #16 #64 
           "optimizer": "adam", 
           "device": "cuda", 
@@ -55,8 +55,8 @@ TRAINCONFIG = {"learningRate": 0.0001,
 
 ############################################################## Activity Classification #########################################################
 CLASSIFIERCONFIG = {"batch_size": 32, 
-                    "learning_rate": 0.0001, 
-                    "num_epochs": 5000, 
+                    "learning_rate": 0.001, 
+                    "num_epochs": 50, 
                     "device": "cpu"
           }
 

@@ -43,30 +43,24 @@ def oneHotEncodeAction(action: str):
     oneHotVector = torch.zeros(9, dtype=torch.float32)
     
     # Map each action string to a one-hot encoded vector
-    if action == "ac0":
+    if action == "ac1":
         oneHotVector[0] = 1.0
-    elif action == "ac1":
-        oneHotVector[1] = 1.0
     elif action == "ac2":
-        oneHotVector[2] = 1.0
+        oneHotVector[1] = 1.0
     elif action == "ac3":
-        oneHotVector[3] = 1.0
+        oneHotVector[2] = 1.0
     elif action == "ac4":
-        oneHotVector[4] = 1.0
+        oneHotVector[3] = 1.0
     elif action == "ac5":
-        oneHotVector[5] = 1.0
+        oneHotVector[4] = 1.0
     elif action == "ac6":
-        oneHotVector[6] = 1.0
+        oneHotVector[5] = 1.0
     elif action == "ac7":
-        oneHotVector[7] = 1.0
+        oneHotVector[6] = 1.0
     elif action == "ac8":
-        oneHotVector[8] = 1.0
+        oneHotVector[7] = 1.0
     elif action == "ac9":
-        oneHotVector[9] = 1.0
-    elif action == "ac10":
-        oneHotVector[10] = 1.0
-    elif action == "ac11":
-        oneHotVector[11] = 1.0
+        oneHotVector[8] = 1.0
     else:
         raise ValueError(f"Unknown action: {action}")
 
@@ -105,7 +99,7 @@ def dataGenerator(alphas: np.ndarray,
     CF = Encoder().to(TRAINCONFIG["device"])
 
     # load weights 
-    #CF = trainLoop.loadCheckpoint(CF, None, MODELCKTPT)
+    CF = trainLoop.loadCheckpoint(CF, None, os.path.join(HPECKPT, None)) ## add trained HPE model name here
 
 
     if train == True:
@@ -159,40 +153,53 @@ def dataGenerator(alphas: np.ndarray,
                     mus.append(mu)
                     sigmas.append(sigma)
             
-            # start sampling data
-            for a in alphas:
-                for r in range(reps):
-                    samples = []
-                    for i in range(radar.size(0) - SEQLEN):
-                        sample = CF.sample(mus[i], sigmas[i], a)
-                        samples.append(sample)
-                    
-                    # samples 
-                    samples = torch.stack(samples, dim = 0)
-                    
-                    # get gt 
-                    label = torch.tensor(oneHotEncodeAction(combination[2]))
-                    
-                    counter += 1
+            if train == True: 
+                # start sampling data
+                for a in alphas:
+                    for r in range(reps):
+                        samples = []
+                        for i in range(radar.size(0) - SEQLEN):
+                            sample = CF.sample(mus[i], sigmas[i], a)
+                            samples.append(sample)
+                        
+                        # samples 
+                        samples = torch.stack(samples, dim = 0)
+                        
+                        # get gt 
+                        label = torch.tensor(oneHotEncodeAction(combination[2]))
+                        
+                        counter += 1
 
-                    # save data
-                    if train == True: 
+                        # save data
                         ## create folders 
                         os.makedirs(os.path.join(PATHLATENT, "dataTrain", "X"), exist_ok=True)
                         os.makedirs(os.path.join(PATHLATENT, "dataTrain", "targets"), exist_ok=True)
 
                         torch.save(samples, os.path.join(PATHLATENT, "dataTrain", "X", str(counter) + ".pth"))
                         torch.save(label, os.path.join(PATHLATENT, "dataTrain", "targets", str(counter) + ".pth"))
-                    else:
-                        ## create folders 
-                        os.makedirs(os.path.join(PATHLATENT, "dataTest", "X"), exist_ok=True)
-                        os.makedirs(os.path.join(PATHLATENT, "dataTest", "targets"), exist_ok=True)
+            else:
+                samples = []
+                for i in range(radar.size(0) - SEQLEN):
+                    sample = CF.sample(mus[i], sigmas[i], a)
+                    samples.append(sample)
+                
+                # samples 
+                samples = torch.stack(samples, dim = 0)
+                
+                # get gt 
+                label = torch.tensor(oneHotEncodeAction(combination[2]))
+                
+                counter += 1
+                ## create folders 
+                os.makedirs(os.path.join(PATHLATENT, "dataTest", "X"), exist_ok=True)
+                os.makedirs(os.path.join(PATHLATENT, "dataTest", "targets"), exist_ok=True)
 
-                        torch.save(samples, os.path.join(PATHLATENT, "dataTest", "X", str(counter) + ".pth"))
-                        torch.save(label, os.path.join(PATHLATENT, "dataTest", "targets", str(counter) + ".pth"))
+                torch.save(samples, os.path.join(PATHLATENT, "dataTest", "X", str(counter) + ".pth"))
+                torch.save(label, os.path.join(PATHLATENT, "dataTest", "targets", str(counter) + ".pth"))
 
 
 if __name__ == "__main__":
     alphas = list(np.linspace(0.0128 - 0.01, 0.0128 + 0.01, 10))
     alphas.append(0.0128)
+    dataGenerator(alphas, 100, True)
     dataGenerator(alphas, 100, False)
