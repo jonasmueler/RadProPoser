@@ -33,19 +33,19 @@ class RadarData(Dataset):
         if self.mode == "train": 
             self.participants = ['p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10', "p11"] #['p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10', "p11"]
             self.angles = ["an0", "an1" , "an2"]
-            self.actions = ["ac1", "ac2", "ac3","ac4","ac5","ac6","ac7","ac8", "ac9"] #, "ac10","ac11"]  #["ac0", "ac1" "ac2", "ac3","ac4","ac5","ac6","ac7","ac8","ac9","ac10","ac11"] 
+            self.actions = ["ac1", "ac2", "ac3","ac4","ac5","ac6","ac7","ac8", "ac9", "ac10","ac11"]  #["ac0", "ac1" "ac2", "ac3","ac4","ac5","ac6","ac7","ac8","ac9","ac10","ac11"] 
             self.recording = ["r0", "r1"]
             
             
         if self.mode == "val":
-            self.participants = ["p3"]
-            self.angles = ["an1"] #, "an1" , "an2"]
-            self.actions = ["ac1", "ac2", "ac3","ac4","ac5","ac6","ac7","ac8","ac9"] #, "ac10","ac11"] #["ac0", "ac1", "ac2", "ac3","ac4","ac5","ac6","ac7","ac8","ac9", "ac10","ac11"]
+            self.participants = ["p1"]
+            self.angles = ["an1" , "an1" , "an2"]
+            self.actions = ["ac1", "ac2", "ac3","ac4","ac5","ac6","ac7","ac8","ac9", "ac10","ac11"] #["ac0", "ac1", "ac2", "ac3","ac4","ac5","ac6","ac7","ac8","ac9", "ac10","ac11"]
             self.recording = ["r0", "r1"]
             
             
         if self.mode == "test":
-            self.participants = ["p1", "p2", "p12"] 
+            self.participants = ["p2", "p3"] 
             self.angles = ["an0"] #, "an1", "an2"]
             self.actions = ["ac0","ac1","ac2","ac3","ac4","ac5","ac6","ac7","ac8","ac9","ac10","ac11"]
             self.recording = ["r0", "r1"]
@@ -64,7 +64,7 @@ class RadarData(Dataset):
         # Shuffle the combined list to get random order
         random.shuffle(trials)
         self.trials = trials 
-        
+        print(os.path.join(self.trainPath, self.mode))
         if not os.path.exists(os.path.join(self.trainPath, self.mode)):
             # generate trainData
             counter = 0
@@ -73,7 +73,8 @@ class RadarData(Dataset):
                 
                 # check if file exists 
                 path = os.path.join(self.rootPath, "radar",  "data_cube_parsed" + "_" + combination[0] + "_" + combination[1]  +  "_" + combination[2]+ "_" + combination[3] + ".npz")
-                if os.path.exists(path):
+                pathTarget = os.path.join(self.rootPath, "matched_skeletons",  "skeleton" + "_" + combination[0]  + "_" + combination[1]  +  "_" + combination[2] + "_" + combination[3] + ".npy")
+                if os.path.exists(pathTarget) and os.path.exists(path):
                     print("processing path ", path)
                     # get radar 
                     data = np.load(path)
@@ -81,10 +82,13 @@ class RadarData(Dataset):
                     radar = data[radar]
                     
                     # get gt
-                    pathTarget = os.path.join(self.rootPath, "skeletons",  "skeleton" + "_" + combination[0]  + "_" + combination[1]  +  "_" + combination[2] + "_" + combination[3] + ".npy")
+                    #pathTarget = os.path.join(self.rootPath, "skeletons",  "skeleton" + "_" + combination[0]  + "_" + combination[1]  +  "_" + combination[2] + "_" + combination[3] + ".npy")
                     dataTarget = np.load(pathTarget)
-                    dataTarget = dataTarget.reshape(dataTarget.shape[0], 26, 3)
-                    
+                    #dataTarget = dataTarget.reshape(dataTarget.shape[0], 26, 3)
+                    #print(dataTarget.shape)
+
+                    # get markers 
+                    markerData = np.load(os.path.join(self.rootPath, "matched_markers",  "markers" + "_" + combination[0]  + "_" + combination[1]  +  "_" + combination[2] + "_" + combination[3] + ".npy"))
                     
                     for b in range(radar.shape[0] - self.seqLen): # <--  use for overlapping sequences
                     #for b in range(0, radar.shape[0] - self.seqLen, int(self.seqLen/2)):
@@ -95,12 +99,17 @@ class RadarData(Dataset):
                         # save radar
                         os.makedirs(os.path.join(self.trainPath, self.mode, "radar"), exist_ok=True)
                         os.makedirs(os.path.join(self.trainPath, self.mode, "target"), exist_ok= True)
+                        os.makedirs(os.path.join(self.trainPath, self.mode, "marker"), exist_ok= True)
                         torch.save(radarTorch, os.path.join(self.trainPath, self.mode, "radar", str(counter) + ".pth"))
                         
                         # save target
                         # get gt
                         gt = torch.from_numpy(dataTarget[b + self.seqLen])
                         torch.save(gt, os.path.join(self.trainPath, self.mode, "target", str(counter) + ".pth"))
+
+                        # get markers
+                        markers = torch.from_numpy(markerData[b + self.seqLen])
+                        torch.save(markers, os.path.join(self.trainPath, self.mode, "marker", str(counter) + ".pth"))
 
 
                         counter += 1
@@ -133,10 +142,15 @@ class RadarData(Dataset):
         # get radar 
         radar = torch.load(os.path.join(os.path.join(self.rootPath, self.mode, "radar", str(idx) + ".pth")), weights_only=True)
 
-        
+        # get gt
         gt = torch.load(os.path.join(os.path.join(self.rootPath, self.mode, "target", str(idx) + ".pth")), weights_only=True)
         gt = gt.flatten()
-        return radar, gt
+
+        # get markers
+        markers = torch.load(os.path.join(os.path.join(self.rootPath, self.mode, "marker", str(idx) + ".pth")), weights_only=True)
+        markers = markers.flatten()
+        
+        return radar, gt, markers
     
 
 
