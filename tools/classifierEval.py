@@ -102,8 +102,8 @@ def computeMetrics(preds: torch.Tensor, labels: torch.Tensor):
 
 if __name__ == "__main__":
     # load model 
-    model = Classifier()
-    model = loadCheckpoint(model, None, os.path.join(ACTIVITYCLASSIFICATIONCKPT, None)) # add trained classifier model name here
+    model = TwoLayerPerceptron()
+    model = loadCheckpoint(model, None, os.path.join(ACTIVITYCLASSIFICATIONCKPT, "model.pth")).cuda() # add trained classifier model name here
     print("model loaded correctly")
     
     # get data loader 
@@ -118,6 +118,7 @@ if __name__ == "__main__":
         for inputs, labels in dataloaderTest:
             inputs, labels = inputs.to(CLASSIFIERCONFIG["device"]), labels.to(CLASSIFIERCONFIG["device"])
             pred = torch.nn.functional.softmax(model(inputs), dim = 1)
+            print(pred)
             preds.append(pred)
             Labels.append(labels)
             

@@ -1,0 +1,42 @@
+{
+  "os":  "Linux-6.8.0-51-generic-x86_64-with-glibc2.39",
+  "python":  "CPython 3.12.3",
+  "startedAt":  "2025-01-28T23:48:00.948340Z",
+  "program":  "/home/jonas/code/bioMechRadar/bioMechEstimation/tools/trainScript.py",
+  "codePath":  "tools/trainScript.py",
+  "git":  {
+    "remote":  "https://github.com/jonasmueler/CVPR2025.git",
+    "commit":  "6dc16d4cb0b73bdea25da6373c56cdec55e04574"
+  },
+  "email":  "mueller-jonas-96@web.de",
+  "root":  "/home/jonas/code/bioMechRadar/bioMechEstimation/tools",
+  "host":  "jonas-desktop",
+  "executable":  "/home/jonas/environments/bioMechRadar/env/bin/python3",
+  "codePathLocal":  "trainScript.py",
+  "cpu_count":  12,
+  "cpu_count_logical":  24,
+  "gpu":  "NVIDIA GeForce RTX 3090 Ti",
+  "gpu_count":  1,
+  "disk":  {
+    "/":  {
+      "total":  "3070669856768",
+      "used":  "1500785291264"
+    }
+  },
+  "memory":  {
+    "total":  "134985031680"
+  },
+  "cpu":  {
+    "count":  12,
+    "countLogical":  24
+  },
+  "gpu_nvidia":  [
+    {
+      "name":  "NVIDIA GeForce RTX 3090 Ti",
+      "memoryTotal":  "25757220864",
+      "cudaCores":  10752,
+      "architecture":  "Ampere"
+    }
+  ],
+  "cudaVersion":  "12.4"
+}

@@ -58,13 +58,13 @@ TRAINCONFIG = {"learningRate": 0.0001,
 
 ############################################################## Activity Classification #########################################################
 CLASSIFIERCONFIG = {"batch_size": 32, 
-                    "learning_rate": 0.001, 
-                    "num_epochs": 50, 
-                    "device": "cpu"
+                    "learning_rate": 0.0001, 
+                    "num_epochs": 5000, 
+                    "device": "cuda"
           }
 
 # paths
-PATHORIGIN = "/home/jonas/code/bioMechRadar/CVPR2025"
+PATHORIGIN = "/home/jonas/code/bioMechRadar/CVPR2025Replication"
 MODELPATH = os.path.join(PATHORIGIN, "models")
 PATHLATENT = os.path.join(PATHORIGIN, "data", "latentData")
 PATHRAW = "/home/jonas/data/radarPose/radar_raw_data/" #"/home/jonas/data/radarPose/raw_radar_data" #os.path.join(PATHORIGIN, "data", "raw_radar_data")
