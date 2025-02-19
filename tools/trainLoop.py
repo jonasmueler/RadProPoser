@@ -24,7 +24,7 @@ def MPJPE(preds: torch.Tensor,
     
     # Calculate the Euclidean distance between predicted and target joint positions
     #diff = preds.reshape(preds.size(0), 14, 3) - targets.reshape(preds.size(0), 14, 3)
-    diff = preds.reshape(preds.size(0), 39, 3) - targets.reshape(preds.size(0), 39, 3) # 26
+    diff = preds.reshape(preds.size(0), 26, 3) - targets.reshape(preds.size(0), 26, 3)
     dist = torch.norm(diff, dim=-1)
     
     # Calculate the mean per joint position error
@@ -104,7 +104,7 @@ def nllLoss(gt: torch.Tensor,
         torch.Tensor: Computed NLL loss.
     """
     # Ensure variance is positive to avoid numerical instability
-    #var = torch.clamp(var, min=1e-6)
+    var = torch.clamp(var, min=1e-6)
 
     # Compute the NLL loss
     pen = TRAINCONFIG["gamma"] * var.mean()
@@ -193,26 +193,15 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
     ###################### start training #############################
     for b in range(params["epochs"]):
         trainCounter = 0
-        for radar,  gt, markers in trainLoader:
+        for radar,  gt in trainLoader:
             model.train()
 
             # move data to device and preprocess
             radar = radar.to(device).to(torch.complex64)
             #radar2 = radar.to(device).float() # .to(torch.complex64)
-            gt = gt.to(device).float() #* 100 # convert to cm
-
-            markers = markers.to(device).float()
+            gt = gt.to(device).float() * 100 # convert to cm
+    
             
-
-            # safety check 
-            try:
-                assert not torch.isnan(radar).any()
-                assert not torch.isnan(gt).any()
-                assert not torch.isnan(markers).any()
-                #print("All tensors are valid (no NaN values).")
-            except AssertionError as e:
-                print(e)
-                        
             # zero the parameter gradients
             optimizer.zero_grad()
 
@@ -221,10 +210,9 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
             if TRAINCONFIG["nll"] == True:
                 # generator loss
                 preds, mu, logVar, muOut, varOut = model.forward(radar)
-                KLloss = KLLoss(mu, logVar) * TRAINCONFIG["beta"]
-                nLL, pen = nllLoss(markers, muOut, varOut)
-                #MSE = TRAINCONFIG["delta"] * criterion(preds, gt)
-                loss = nLL +  KLloss #+ MSE
+                KLloss = KLLoss(mu, logVar) 
+                nLL, pen = nllLoss(gt, muOut, varOut)
+                loss = nLL + TRAINCONFIG["beta"] * KLloss
 
             else:
                 preds = model.forward(radar)
@@ -232,7 +220,7 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
 
 
             loss.backward()
-            torch.nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0) # gradient clipping; 
+            torch.nn.utils.clip_grad_value_(model.parameters(), clip_value=3.0) # gradient clipping; 
             optimizer.step()
             trainCounter += 1
 
@@ -242,7 +230,6 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                         wandb.log({"nll": nLL.detach().cpu().item(), 
                                    "KLLoss": KLloss.detach().cpu().item(), 
                                    "loss": loss.detach().cpu().item(), 
-                                   #"MSE": MSE.detach().cpu().item(), 
                                    "varPenalty": pen.detach().cpu().item()})
             else:
                 if WandB:
@@ -254,11 +241,10 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
             print("start validating model")
             valLossMean = 0
             counter = 0
-            for x,  y, markers in valLoader:
+            for x,  y in valLoader:
                 model.eval()
                 x = x.to(device).to(device).to(torch.complex64)
-                y = y.to(device).float() #* 100
-                markers = markers.to(device).float()
+                y = y.to(device).float() * 100
 
                 if TRAINCONFIG["nll"] == True:
                     _, _, _, preds, _ = model.forward(x)
@@ -267,7 +253,7 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                     preds = model.forward(x)
 
                 # calculate validation loss
-                valLoss = MPJPE(preds, markers)
+                valLoss = MPJPE(preds, y)
                 valLossMean += valLoss
                 counter += 1
                 

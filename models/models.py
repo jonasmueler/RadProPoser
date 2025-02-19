@@ -5,7 +5,6 @@ from hrnet3D_config import *
 from hrnet3D_config_4D import MODEL_CONFIGS as cfg_4D
 from yacs.config import CfgNode as CN
 import torch
-import transformer
 
 class HighResolutionModule(nn.Module):
     def __init__(
@@ -422,47 +421,29 @@ class RadProPoser(nn.Module):
 
                 nn.Flatten(start_dim = 1, end_dim = -1)
             )
+
         
-        # attention based weighting 
-        self.transformer = transformer.TransformerEncoder(1024, 4, 128, 1)
-        self.attention = False
-     
         # latent space 
         self.mu = nn.Sequential(nn.Linear(2048, 256))
         self.sigma = nn.Sequential(nn.Linear(2048, 256))
-        self.varianceScaling = nn.Parameter(torch.tensor(0.1)) # 0.1
+        self.varianceScaling = nn.Parameter(torch.tensor(0.1))
         self.Nsamples = 500
 
-        # decoder keypoints
-        self.decoder = nn.Sequential(nn.Linear(256, 128),  # 256, 128
-                                     nn.Linear(128, 78)) # 128, 78
-        
-        # decoder marker estimation
-        self.decoderMarker = nn.Sequential(nn.Linear(256, 512),  # 256, 128
-                                     nn.Linear(512, 117)) # 128, 78
-        
-    def sample(self, mu: torch.Tensor, logvar: torch.Tensor, device: str = "cuda") -> torch.Tensor:
+        # decoder 
+        self.decoder = nn.Sequential(nn.Linear(256, 128), 
+                                     nn.Linear(128, 78))
+    
+    def sample(self, mu: torch.Tensor, logvar: torch.Tensor, device: str = "cpu") -> torch.Tensor:
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std).to(device) * self.varianceScaling 
         return mu + eps * std
 
     
     def preProcess(self, 
-                   x: torch.Tensor, 
-                   clutterRemoval: bool = True):
-        if clutterRemoval:
-            x = x - torch.mean(x, dim = -1, keepdim = True)
-
-        # fft
-        #x = torch.fft.fftn(x, dim=(-4, -3, -2, -1), norm="forward")
-        x = torch.fft.fft(torch.fft.fft(torch.fft.fft(torch.fft.fft(x ,dim = -1,  norm = "forward"), dim = -2,  norm = "forward"), dim = -3,  norm = "forward"), dim = -4,  norm = "forward")
-
-        # frequency shift 
-        #x = torch.fft.fftshift(x, dim=(-4, -3, -2, -1))
-
-        # permute to coordinate representation
+                   x: torch.Tensor):
+        x = x - torch.mean(x, dim = -1, keepdim = True)
+        x = torch.fft.fftn(x, dim=(0, 1, 2, 3), norm="forward")
         x = x.permute(0, 1, 5, 2, 3, 4) 
-
         return x
 
     def applyBackbone(self, x: torch.Tensor):
@@ -475,20 +456,8 @@ class RadProPoser(nn.Module):
             
             helper = F.interpolate(feature.float(), size=(4, 4, 64), mode='trilinear')
             features.append(helper)
-
-        # attention weighting
-        if self.attention == True:
-            features = torch.cat(features, dim = 1)
-            b, c, d, a, e = features.size()
-            features = features.flatten(start_dim = -3, end_dim = -1)
-            features = self.transformer(features)
-            features = features.reshape(b, c, d, a, e)
-
         
-        else:
-            features = torch.cat(features, dim = 1)
-
-        # fuse into latent     
+        features = torch.cat(features, dim = 1)
         features = self.bottleNeck(features)
 
         return features
@@ -505,6 +474,7 @@ class RadProPoser(nn.Module):
     def getLatent(self, x: torch.Tensor)-> tuple[torch.Tensor, torch.Tensor]:
         # fft layer 
         x = self.preProcess(x) # watch out with batch = 1
+        device = x.device
 
         # part in real and imag
         xComp = [x.real, x.imag]
@@ -544,15 +514,13 @@ class RadProPoser(nn.Module):
         mu = self.mu(spatiotemp)
         sigma = self.sigma(spatiotemp)
 
-        # calculate kaypoints
-        #keypoints = self.decoder(mu)
-        
-        samples = torch.stack([self.decoderMarker(self.sample(mu, sigma, device = device)) for i in range(self.Nsamples)], dim = 1)
+        samples = self.decoder(torch.stack([self.sample(mu, sigma, device = device) for i in range(self.Nsamples)], dim = 1))
         
         muOut = torch.mean(samples, dim = 1)
         varOut = torch.var(samples, dim = 1)
 
-        return self.decoderMarker(self.sample(mu, sigma, device = device)), mu, sigma, muOut, varOut
+        return self.decoder(self.sample(mu, sigma)), mu, sigma, muOut, varOut
+
         
 
 class LSTMModel(nn.Module):
@@ -612,7 +580,7 @@ class CNN_LSTM(nn.Module):
 
         
         # LSTM head 
-        self.LSTM = LSTMModel(128, 512, 3, 117)
+        self.LSTM = LSTMModel(128, 512, 3, 78)
     
     def preProcess(self, 
                    x: torch.Tensor):

@@ -10,8 +10,8 @@ import numpy as np
 
 ## LOAD MODEL HERE
 sys.path.append(MODELPATH)
-#from models import RadProPoser as Encoder
-from models import CNN_LSTM as Encoder
+from models import RadProPoser as Encoder
+#from models import CNN_LSTM as Encoder
 #from models import HRRadarPose as Encoder
 
 CF = Encoder().to(TRAINCONFIG["device"])
@@ -67,7 +67,7 @@ MSE = torch.nn.MSELoss()
 
 
 if __name__ == "__main__":
-    #setSeed(42)
+    setSeed(42)
     trainLoop.trainLoop(dataTrain,
               dataVal, 
               CF,

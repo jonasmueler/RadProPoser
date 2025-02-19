@@ -5,57 +5,6 @@ import os
 from tqdm import tqdm
 from config import *
 import sys
-from umap import UMAP
-
-def umap_projection(data: torch.Tensor, n_components: int, n_neighbors: int = 30, min_dist: float = 0.1, random_state: int = 42): # 15, 0.1
-    """
-    Perform UMAP on the given data tensor.
-
-    Args:
-        data (torch.Tensor): Input data of shape (n_samples, n_features).
-        n_components (int): Number of dimensions to project the data into (e.g., 2 for visualization).
-        n_neighbors (int): Number of neighbors considered for UMAP (default: 15).
-        min_dist (float): Minimum distance between points in the low-dimensional space (default: 0.1).
-        random_state (int): Random state for reproducibility (default: 42).
-
-    Returns:
-        torch.Tensor: Transformed data of shape (n_samples, n_components).
-    """
-    data_np = data.detach().cpu().numpy()
-    umap_model = UMAP(n_components=n_components, n_neighbors=n_neighbors, random_state = random_state, min_dist=min_dist, n_jobs = -1)
-    transformed_data = umap_model.fit_transform(data_np)
-
-    return torch.tensor(transformed_data)
-
-def pca(data: torch.Tensor, n_components: int):
-    """
-    Perform PCA on the given data tensor.
-
-    Args:
-        data (torch.Tensor): Input data of shape (n_samples, n_features).
-        n_components (int): Number of principal components to retain.
-
-    Returns:
-        torch.Tensor: Transformed data of shape (n_samples, n_components).
-        torch.Tensor: Principal components (eigenvectors) of shape (n_features, n_components).
-        torch.Tensor: Explained variances (percent) of shape (n_components,).
-    """
-    # Step 1: Center the data by subtracting the mean
-    mean = data.mean(dim=0)
-    centered_data = data - mean
-
-    # Step 2: Perform low-rank PCA
-    U, S, V = torch.pca_lowrank(centered_data, q=n_components)
-
-    # Step 3: Project the data onto the principal components
-    transformed_data = torch.mm(centered_data, V[:, :n_components])
-
-    # Step 4: Compute explained variances
-    total_variance = (S ** 2).sum() / (data.size(0) - 1)
-    explained_variances = (S[:n_components] ** 2) / (data.size(0) - 1)
-    percent_explained_variance = explained_variances / total_variance * 100
-
-    return transformed_data #, V[:, :n_components], percent_explained_variance
 
 
 def filterFilesBySubstrings(directory: str,
@@ -150,12 +99,7 @@ def dataGenerator(alphas: np.ndarray,
     CF = Encoder().to(TRAINCONFIG["device"])
 
     # load weights 
-    CF = trainLoop.loadCheckpoint(CF, None, os.path.join(HPECKPT, "RadProPoser6")) ## add trained HPE model name here
-
-    # load alpha for data generation 
-    #alphas = list(np.linspace(CF.varianceScaling.detach().cpu().numpy() - 0.01, 0.0128 + 0.01, 20))
-    alphas = []
-    alphas.append(CF.varianceScaling.detach().cpu().numpy())
+    CF = trainLoop.loadCheckpoint(CF, None, os.path.join(HPECKPT, None)) ## add trained HPE model name here
 
 
     if train == True:
@@ -215,13 +159,11 @@ def dataGenerator(alphas: np.ndarray,
                     for r in range(reps):
                         samples = []
                         for i in range(radar.size(0) - SEQLEN):
-                            sample = CF.sampleLatent(mus[i], sigmas[i], a)
+                            sample = CF.sample(mus[i], sigmas[i], a)
                             samples.append(sample)
                         
                         # samples 
-                        samples = torch.stack(samples, dim = 0).squeeze()
-                        #samples = umap_projection(samples, 2)
-                        samples = pca(samples, 2)
+                        samples = torch.stack(samples, dim = 0)
                         
                         # get gt 
                         label = torch.tensor(oneHotEncodeAction(combination[2]))
@@ -238,13 +180,11 @@ def dataGenerator(alphas: np.ndarray,
             else:
                 samples = []
                 for i in range(radar.size(0) - SEQLEN):
-                    sample = CF.sampleLatent(mus[i], sigmas[i], alphas[0])
+                    sample = CF.sample(mus[i], sigmas[i], a)
                     samples.append(sample)
                 
                 # samples 
-                samples = torch.stack(samples, dim = 0).squeeze()
-                #samples = torch.stack(mus, dim = 0).squeeze()
-                samples = pca(samples, 2)
+                samples = torch.stack(samples, dim = 0)
                 
                 # get gt 
                 label = torch.tensor(oneHotEncodeAction(combination[2]))
@@ -259,8 +199,7 @@ def dataGenerator(alphas: np.ndarray,
 
 
 if __name__ == "__main__":
-    #alphas = list(np.linspace(0.0128 - 0.01, 0.0128 + 0.01, 10))
-    alphas = []
-    #alphas.append(0.0128)
-    dataGenerator(alphas, 20, False)
-    #dataGenerator(alphas, 100, False)
+    alphas = list(np.linspace(0.0128 - 0.01, 0.0128 + 0.01, 10))
+    alphas.append(0.0128)
+    dataGenerator(alphas, 100, True)
+    dataGenerator(alphas, 100, False)
