@@ -1,5 +1,5 @@
 
-# RadProPoser: Radar-based Human Pose Estimation and Activity Recognition through Latent Space Mining
+# RadProPoser: Uncertainty-Aware Human Pose Estimation and Activity Classification from Raw Radar Data
  
 <div align="center">
   <img src="assets/overview.png" alt="Project Overview" width="1000">
