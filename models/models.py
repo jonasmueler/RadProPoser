@@ -427,7 +427,7 @@ class RadProPoser(nn.Module):
         self.mu = nn.Sequential(nn.Linear(2048, 256))
         self.sigma = nn.Sequential(nn.Linear(2048, 256))
         self.varianceScaling = nn.Parameter(torch.tensor(0.1))
-        self.Nsamples = 500
+        self.Nsamples = 3
 
         # decoder 
         self.decoder = nn.Sequential(nn.Linear(256, 128), 
