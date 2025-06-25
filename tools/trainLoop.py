@@ -6,6 +6,9 @@ import numpy as np
 from config import *
 import torch.optim as optim
 import torch.nn.functional as F
+from edl_pytorch import evidential_regression
+from calibration_sharpness import *
+from torch.optim.lr_scheduler import SequentialLR, LambdaLR
 
 
 def MPJPE(preds: torch.Tensor, 
@@ -112,6 +115,52 @@ def nllLoss(gt: torch.Tensor,
 
     return loss, pen
 
+def nllLoss_precision(gt: torch.Tensor, 
+                        mu: torch.Tensor, 
+                        log_variance: torch.Tensor) -> torch.Tensor:
+    """
+    NLL loss using predicted log variance, internally converting
+    to log precision and using the precision-based Gaussian NLL.
+
+    Args:
+        gt (torch.Tensor): Ground truth tensor.
+        mu (torch.Tensor): Predicted mean tensor.
+        log_variance (torch.Tensor): Predicted log variance (log(sigma^2)).
+
+    Returns:
+        torch.Tensor: Scalar NLL loss.
+    """
+    # Step 1: Convert to variance
+    #variance = torch.exp(log_variance)
+    variance = log_variance
+
+    # Step 2: Compute precision
+    precision = 1.0 / variance
+
+    # Step 3: Compute log precision
+    log_precision = torch.log(precision)
+
+    # penalty 
+    pen = -(TRAINCONFIG["gamma"] *log_precision.mean())
+
+    # Step 4: Final NLL computation
+    nll = (pen + precision * (gt - mu) ** 2).mean() 
+    return nll, pen
+
+def evidential_uncertainty(v: torch.Tensor, 
+                           alpha: torch.Tensor, 
+                           beta: torch.Tensor) -> torch.Tensor:
+    # Clamp for numerical stability
+    #v = torch.clamp(v, min=1.0)
+    #alpha = torch.clamp(alpha, min=1.1)
+    #beta = torch.clamp(beta, max=1e6)
+
+    aleatoric = beta / (alpha - 1)
+    epistemic = beta / (v * (alpha - 1))
+
+    #return aleatoric + epistemic
+    return epistemic 
+
 def trainLoop(trainLoader: torch.utils.data.DataLoader, 
               valLoader: torch.utils.data.DataLoader, 
               model: nn.Module,
@@ -188,7 +237,6 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
 
     # initilaize LR sheduling
     scheduler = optim.lr_scheduler.MultiplicativeLR(optimizer, lrLambda)
-    
 
     ###################### start training #############################
     for b in range(params["epochs"]):
@@ -211,8 +259,28 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                 # generator loss
                 preds, mu, logVar, muOut, varOut = model.forward(radar)
                 KLloss = KLLoss(mu, logVar) 
-                nLL, pen = nllLoss(gt, muOut, varOut)
+                nLL, pen = nllLoss_precision(gt, muOut, varOut)
                 loss = nLL + TRAINCONFIG["beta"] * KLloss
+
+            elif TRAINCONFIG["nf"] == True:
+                    mu, var, kld = model.forward(radar, inference = False)
+
+                    nll, pen = nllLoss_precision(gt, mu, var) 
+                    loss = nll + TRAINCONFIG["beta"] * kld
+            
+            elif TRAINCONFIG["evd"] == True:
+                # generator loss
+                pred_nig, pred = model(radar)
+
+                loss_uncertainty = evidential_regression(
+                        pred_nig,      # predicted Normal Inverse Gamma parameters
+                        gt,             # target labels
+                        lamb=TRAINCONFIG["lambda"],    # regularization coefficient 
+                    )
+                
+                MSE = criterion(pred, gt)
+
+                loss = 10 * loss_uncertainty + MSE
 
             else:
                 preds = model.forward(radar)
@@ -220,7 +288,7 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
 
 
             loss.backward()
-            torch.nn.utils.clip_grad_value_(model.parameters(), clip_value=3.0) # gradient clipping; 
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
             optimizer.step()
             trainCounter += 1
 
@@ -228,9 +296,26 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
             if TRAINCONFIG["nll"] == True:
                 if WandB:
                         wandb.log({"nll": nLL.detach().cpu().item(), 
-                                   "KLLoss": KLloss.detach().cpu().item(), 
+                                   "KLLOss": KLloss.detach().cpu().item(), 
                                    "loss": loss.detach().cpu().item(), 
                                    "varPenalty": pen.detach().cpu().item()})
+                        
+            elif TRAINCONFIG["nf"] == True:
+                if WandB:
+                        wandb.log({"nll": nll.detach().cpu().item(), 
+                                   "loss": loss.detach().cpu().item(), 
+                                   "varPen": pen.detach().cpu().item(), 
+                                   "KL": kld.detach().cpu().item()})
+                        
+            elif TRAINCONFIG["evd"] == True:
+                if WandB:
+                        wandb.log({"evidential_loss": loss_uncertainty, 
+                                   "loss": loss, 
+                                   "v": pred_nig[1].mean(), 
+                                   "alpha": pred_nig[2].mean(), 
+                                   "beta": pred_nig[3].mean(), 
+                                   "MSE": MSE.detach().cpu().item()})
+
             else:
                 if WandB:
                         wandb.log({"MSE": loss.detach().cpu().item()})
@@ -240,6 +325,7 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
         with torch.no_grad():
             print("start validating model")
             valLossMean = 0
+            predictions, variances, gts = [], [], []
             counter = 0
             for x,  y in valLoader:
                 model.eval()
@@ -247,21 +333,56 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                 y = y.to(device).float() * 100
 
                 if TRAINCONFIG["nll"] == True:
-                    _, _, _, preds, _ = model.forward(x)
+                    _, _, _, preds, logvar = model.forward(x)
+
+                    var = torch.exp(logvar)
+
+                    predictions.append(preds.detach().cpu())
+                    variances.append(var.detach().cpu())
+                    gts.append(y.detach().cpu())
+
+                
+                elif TRAINCONFIG["nf"] == True:
+                    preds, var, kld = model.forward(x, inference = True)
+
+                    predictions.append(preds.detach().cpu())
+                    variances.append(var.detach().cpu())
+                    gts.append(y.detach().cpu())
+                
+                elif TRAINCONFIG["evd"] == True:
+                    # generator loss
+                    pred_nig, preds = model(x) # (mu, v, alpha, beta)
+                    var = evidential_uncertainty(pred_nig[1], pred_nig[2], pred_nig[3]) # epistemic uncertainty
+
+                    predictions.append(preds.detach().cpu())
+                    variances.append(var.detach().cpu())
+                    gts.append(y.detach().cpu())
+                    
 
                 else:
                     preds = model.forward(x)
 
                 # calculate validation loss
+                
                 valLoss = MPJPE(preds, y)
                 valLossMean += valLoss
+
                 counter += 1
                 
                         
             valLosses = valLossMean/counter + 1 
 
+            # calibration scores 
+            #mu = torch.cat(predictions, dim = 0)
+            #var  = torch.cat(variances, dim = 0)
+            #gt = mu = torch.cat(gts, dim = 0)
+            #calLoss, sharpness, _ = compute_calibration_and_sharpness(mu, var, gt, 500)
+
             if WandB:
-                    wandb.log({"valLoss": valLosses.detach().cpu().item()})
+                    wandb.log({"valLoss": valLosses.detach().cpu().item(), 
+                               #"calibration": calLoss, 
+                               #"sharpness": sharpness}
+                               })
             print("valLoss: ", valLosses.detach().cpu().item())
 
             # save model and optimizer checkpoint

@@ -2,24 +2,61 @@ import os
 
 ## globals
 SEQLEN = 8
-MODELNAME = "RadProPoser"
+MODELNAME = "RadProPoserLinPad"
 
 ############################################### HPE #######################################################################
 ## model paramas
-#RadProPoser
+#RadProPoserVAE
 # define hyperparameters
-TRAINCONFIG = {"learningRate": 0.001, 
+
+TRAINCONFIG = {"learningRate": 0.0001, 
           "weightDecay": 0.0001,
-          "epochs": 12, 
+          "epochs": 24, 
           "batchSize": 16, 
           "optimizer": "adam", 
           "device": "cuda", 
           "betas": (0.9, 0.999), # momentum and scaling for ADAM, 
           "lrDecay": 0.99, 
           "beta": 20, 
-          "gamma": 5, 
-          "nll": True,
+          "gamma": 5, # 5 
+          "nll": False,
+          "evd": False,
+          "nf": False
+
           }
+
+#RadProPoserEvidential
+# define hyperparameters
+#TRAINCONFIG = {"learningRate": 0.0001, 
+#          "weightDecay": 0.0001,
+#          "epochs": 24, 
+#          "batchSize": 4, 
+#          "optimizer": "adam", 
+#          "device": "cuda", 
+#          "betas": (0.9, 0.999), # momentum and scaling for ADAM, 
+#          "lrDecay": 0.99, 
+#          "lambda":0.001, # 0.001
+#          "nll": False,
+#          "evd": True,
+#          "nf": False
+#          }
+
+# radproposer noermalizing flow 
+#TRAINCONFIG = {"learningRate": 0.0001, 
+#          "weightDecay": 0.0001,
+#          "epochs": 24, 
+#          "batchSize": 32, 
+#          "optimizer": "adam", 
+#          "device": "cuda", 
+#          "betas": (0.9, 0.999), # momentum and scaling for ADAM, 
+#          "lrDecay": 0.99, 
+#          "gamma": 5,
+#          "beta": 50,
+#          "nll": False,
+#          "evd": False, 
+#          "nf": True
+#          }
+
 
 
 
@@ -61,9 +98,9 @@ CLASSIFIERCONFIG = {"batch_size": 32,
           }
 
 # paths
-PATHORIGIN = None
+PATHORIGIN = "/home/jonas/code/RadProPoser"
 MODELPATH = os.path.join(PATHORIGIN, "models")
 PATHLATENT = os.path.join(PATHORIGIN, "data", "latentData")
-PATHRAW = os.path.join(PATHORIGIN, "data", "raw_radar_data")
+PATHRAW = "/home/jonas/data/radarPose/radar_raw_data"
 ACTIVITYCLASSIFICATIONCKPT = os.path.join(PATHORIGIN, "trainedModels", "activityClassification")
 HPECKPT = os.path.join(PATHORIGIN, "trainedModels", "humanPoseEstimation")

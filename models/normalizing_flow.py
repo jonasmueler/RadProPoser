@@ -5,6 +5,13 @@ from hrnet3D_config import *
 from hrnet3D_config_4D import MODEL_CONFIGS as cfg_4D
 from yacs.config import CfgNode as CN
 import torch
+from edl_pytorch import NormalInvGamma
+import normflows as nf
+from normflows.flows import Planar, Radial, MaskedAffineFlow, BatchNorm
+from normflows import nets
+from normflows.flows import ActNorm
+from normflows.flows import ActNorm, Invertible1x1Conv
+from normflows.nets import MLP
 
 class HighResolutionModule(nn.Module):
     def __init__(
@@ -401,293 +408,180 @@ class HighResolution3DNet(nn.Module):
             y_list = self.stage4(x_list)
 
         return y_list
+
+class ResidualMLP(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Linear(dim, dim // 4),
+            nn.GELU(),
+            nn.Linear(dim // 4, dim)
+        )
+
+    def forward(self, x):
+        return x + self.block(x)
     
-class RadProPoser(nn.Module):
+
+class SimpleFlowModel(nn.Module):
+    def __init__(self, flows):
+        super().__init__()
+        self.flows = nn.ModuleList(flows)
+
+    def forward(self, z):
+        ld = torch.zeros(z.shape[0], device=z.device)
+        for flow in self.flows:
+            z, ld_ = flow(z)
+            ld += ld_
+        return z, ld
+
+class RadProPoserVAE(nn.Module):
     def __init__(self):
-        super(RadProPoser, self).__init__()
+        super(RadProPoserVAE, self).__init__()
 
         # backbone 
         self.backbone = HighResolution3DNet(
             MODEL_CONFIGS["hr_tiny_feat64_zyx_l4_in64"], full_res_stem=True)
-        
+
         self.bottleNeck = nn.Sequential(
-                nn.Conv3d(in_channels=384, out_channels=32, kernel_size=(1, 1, 8), stride=(1, 1, 8)),  # 3x3x3 conv
-                nn.BatchNorm3d(32),  # Batch normalization
-                nn.ReLU(inplace=True),  # ReLU activation
+            nn.Conv3d(in_channels=384, out_channels=32, kernel_size=(1, 1, 8), stride=(1, 1, 8)),
+            nn.BatchNorm3d(32),
+            nn.ReLU(inplace=True),
+            nn.Conv3d(in_channels=32, out_channels=8, kernel_size=(1, 1, 8), stride=(1, 1, 8)),
+            nn.BatchNorm3d(8),
+            nn.ReLU(inplace=True),
+            nn.Flatten(start_dim=1, end_dim=-1)
+        )
 
-                nn.Conv3d(in_channels=32, out_channels=8, kernel_size=(1, 1, 8), stride=(1, 1, 8)),  # 3x3x3 conv
-                nn.BatchNorm3d(8),  # Batch normalization
-                nn.ReLU(inplace=True),  # ReLU activation
-
-                nn.Flatten(start_dim = 1, end_dim = -1)
-            )
-
-        
         # latent space 
-        self.mu = nn.Sequential(nn.Linear(2048, 256))
-        self.sigma = nn.Sequential(nn.Linear(2048, 256))
+        self.mu = nn.Sequential(nn.LayerNorm(2048), nn.Linear(2048, 256))
+        self.sigma = nn.Sequential(nn.LayerNorm(2048), nn.Linear(2048, 256))
         self.varianceScaling = nn.Parameter(torch.tensor(0.1))
-        self.Nsamples = 3
 
         # decoder 
-        self.decoder = nn.Sequential(nn.Linear(256, 128), 
-                                     nn.Linear(128, 78))
-    
+        self.decoderMu = nn.Sequential(ResidualMLP(256), ResidualMLP(256), nn.Linear(256, 78))
+        self.decoderVar = nn.Sequential(ResidualMLP(256), ResidualMLP(256), nn.Linear(256, 78), torch.nn.Softplus())
+
+        # flow posterior setup with BatchNorm
+        latent_dim = 256
+        flows = []
+        flow = "realNVP"
+        if flow == "realNVP":
+            for i in range(8):
+                mask = torch.tensor(
+                    [0, 1] * (latent_dim // 2) if i % 2 == 0 else [1, 0] * (latent_dim // 2),
+                    dtype=torch.float32
+                ).to("cuda")
+                
+                # Input and output for s, t are half the latent_dim (due to masking)
+                s = MLP([latent_dim, latent_dim ], init_zeros = True)#, output_fn = "tanh")
+                t = MLP([latent_dim, latent_dim], init_zeros = True)#, output_fn = "tanh")
+                
+                if i == 0:
+                    flows.append(ActNorm(latent_dim))  # Optional: only once at the start
+                
+                flows.append(MaskedAffineFlow(mask, t, s))
+            
+
+        self.flows = SimpleFlowModel(flows)
+
+
     def sample(self, mu: torch.Tensor, logvar: torch.Tensor, device: str = "cpu") -> torch.Tensor:
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std).to(device) * self.varianceScaling 
         return mu + eps * std
 
-    
-    def preProcess(self, 
-                   x: torch.Tensor):
-        x = x - torch.mean(x, dim = -1, keepdim = True)
+    def preProcess(self, x: torch.Tensor):
+        x = x - torch.mean(x, dim=-1, keepdim=True)
         x = torch.fft.fftn(x, dim=(0, 1, 2, 3), norm="forward")
         x = x.permute(0, 1, 5, 2, 3, 4) 
         return x
 
     def applyBackbone(self, x: torch.Tensor):
-        # get features
         featureList = self.backbone(x)
-
-        # interpolate to same size
-        features = []
-        for feature in featureList:
-            
-            helper = F.interpolate(feature.float(), size=(4, 4, 64), mode='trilinear')
-            features.append(helper)
-        
-        features = torch.cat(features, dim = 1)
+        features = [F.interpolate(feature.float(), size=(4, 4, 64), mode='trilinear') for feature in featureList]
+        features = torch.cat(features, dim=1)
         features = self.bottleNeck(features)
-
         return features
-    
-    def sampleLatent(self, 
-                     mu: torch.Tensor, 
-                     sigma: torch.Tensor, 
-                     alpha: float = None)->torch.Tensor:
-        if alpha != None:
+
+    def sampleLatent(self, mu: torch.Tensor, sigma: torch.Tensor, alpha: float = None)->torch.Tensor:
+        if alpha is not None:
             self.varianceScaling = torch.tensor(alpha)
-        out = self.sample(mu, sigma)
-        return out
-    
+        return self.sample(mu, sigma)
+
     def getLatent(self, x: torch.Tensor)-> tuple[torch.Tensor, torch.Tensor]:
-        # fft layer 
-        x = self.preProcess(x) # watch out with batch = 1
-        device = x.device
-
-        # part in real and imag
         xComp = [x.real, x.imag]
-        spatFeat = []
-        for elmt in xComp:
-            for i in range(elmt.size(1)):
-                helper = self.applyBackbone(elmt[:,i].float())
-                spatFeat.append(helper)
-        
-        # fuse together to get mu and sgm
-        spatiotemp = torch.cat(spatFeat, dim = 1)
-
-        # get latent 
+        spatFeat = [self.applyBackbone(elmt[:, i].float()) for elmt in xComp for i in range(elmt.size(1))]
+        spatiotemp = torch.cat(spatFeat, dim=1)
         mu = self.mu(spatiotemp)
         sigma = self.sigma(spatiotemp)
-        
         return mu, sigma
 
     def forward(self, 
-                x: torch.Tensor):
-        # fft layer 
-        x = self.preProcess(x) # watch out with batch = 1
-        device = x.device
-
-        # part in real and imag
-        xComp = [x.real, x.imag]
-        spatFeat = []
-        for elmt in xComp:
-            for i in range(elmt.size(1)):
-                helper = self.applyBackbone(elmt[:,i].float())
-                spatFeat.append(helper)
+                x: torch.Tensor, 
+                inference: bool = False):
         
-        # fuse together to get mu and sgm
-        spatiotemp = torch.cat(spatFeat, dim = 1)
+        if inference == False:
+            mu, logvar = self.getLatent(x)
+            std = torch.exp(0.5 * logvar)
+            norm_scale = torch.randn_like(std) #* self.varianceScaling
+            z0 = mu + norm_scale * std
 
-        # get latent 
-        mu = self.mu(spatiotemp)
-        sigma = self.sigma(spatiotemp)
+            # Flow transformation
+            zK, log_det = self.flows(z0)
+            zK = zK.squeeze()
 
-        samples = self.decoder(torch.stack([self.sample(mu, sigma, device = device) for i in range(self.Nsamples)], dim = 1))
+            # Distributions
+            q0 = torch.distributions.Normal(mu, torch.exp(0.5 * logvar))
+            p = torch.distributions.Normal(0.0, 1.0)
+
+            # KLD with flow
+            kld = (
+                -torch.sum(p.log_prob(zK), dim=-1)
+                + torch.sum(q0.log_prob(z0), dim=-1)
+                - log_det.view(-1)
+            ).mean()
+
+            muOut = self.decoderMu(zK)
+            varOut = self.decoderVar(zK)
         
-        muOut = torch.mean(samples, dim = 1)
-        varOut = torch.var(samples, dim = 1)
+        if inference == True:
+            mu, logvar = self.getLatent(x)
+            z0 = mu 
 
-        return self.decoder(self.sample(mu, sigma)), mu, sigma, muOut, varOut
+            # Flow transformation
+            zK, log_det = self.flows(z0)
+            zK = zK.squeeze()
 
-        
+            # Distributions
+            q0 = torch.distributions.Normal(mu, torch.exp(0.5 * logvar))
+            p = torch.distributions.Normal(0.0, 1.0)
 
-class LSTMModel(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers, output_size):
-        super(LSTMModel, self).__init__()
-        
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
-        
-        # LSTM layer
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
-        
-        # Fully connected layer
-        self.fc = nn.Linear(hidden_size, output_size)
+            # KLD with flow
+            kld = (
+                -torch.sum(p.log_prob(zK), dim=-1)
+                + torch.sum(q0.log_prob(z0), dim=-1)
+                - log_det.view(-1)
+            ).mean()
 
-    def initialize_hidden_state(self, batch_size, device):
-        # Initialize hidden state (h0) and cell state (c0)
-        h0 = torch.zeros(self.num_layers, batch_size, self.hidden_size).to(device)  # Hidden state
-        c0 = torch.zeros(self.num_layers, batch_size, self.hidden_size).to(device)  # Cell state
-        return (h0, c0)
+            muOut = self.decoderMu(zK)
+            varOut = self.decoderVar(zK)
 
-    def forward(self, x):
-        batch_size = x.size(0)
-        device = x.device
+        return muOut, varOut, kld
 
-        # Initialize hidden and cell states
-        h0, c0 = self.initialize_hidden_state(batch_size, device)
-
-        # LSTM output: (batch_size, seq_length, hidden_size)
-        lstm_out, _ = self.lstm(x, (h0, c0))
-        
-        # Use the output from the last time step
-        out = self.fc(lstm_out[:, -1, :])
-        
-        return out
-
-
-class CNN_LSTM(nn.Module):
-    def __init__(self):
-        super(CNN_LSTM, self).__init__()
-
-        # backbone 
-        self.backbone = HighResolution3DNet(
-            MODEL_CONFIGS["hr_tiny_feat64_zyx_l4_in64"], full_res_stem=True)
-        
-        self.bottleNeck = nn.Sequential(
-                nn.Conv3d(in_channels=384, out_channels=32, kernel_size=(1, 1, 8), stride=(1, 1, 8)),  # 3x3x3 conv
-                nn.BatchNorm3d(32),  # Batch normalization
-                nn.ReLU(inplace=True),  # ReLU activation
-
-                nn.Conv3d(in_channels=32, out_channels=8, kernel_size=(1, 1, 8), stride=(1, 1, 8)),  # 3x3x3 conv
-                nn.BatchNorm3d(8),  # Batch normalization
-                nn.ReLU(inplace=True),  # ReLU activation
-
-                nn.Flatten(start_dim = 1, end_dim = -1)
-            )
-
-        
-        # LSTM head 
-        self.LSTM = LSTMModel(128, 512, 3, 78)
-    
-    def preProcess(self, 
-                   x: torch.Tensor):
-        x = x - torch.mean(x, dim = -1, keepdim = True)
-        x = torch.fft.fftn(x, dim=(0, 1, 2, 3), norm="forward")
-        x = x.permute(0, 1, 5, 2, 3, 4) 
-        return x
-
-    def applyBackbone(self, x: torch.Tensor):
-        # get features
-        featureList = self.backbone(x)
-
-        # interpolate to same size
-        features = []
-        for feature in featureList:
-            
-            helper = F.interpolate(feature.float(), size=(4, 4, 64), mode='trilinear')
-            features.append(helper)
-        
-        features = torch.cat(features, dim = 1)
-        features = self.bottleNeck(features)
-
-        return features
-    
-    def forward(self, 
-                x: torch.Tensor):
-        # fft layer 
-        x = self.preProcess(x) # watch out with batch = 1
-
-        # part in real and imag
-        xComp = [x.real, x.imag]
-        spatFeat = []
-        for elmt in xComp:
-            for i in range(elmt.size(1)):
-                helper = self.applyBackbone(elmt[:,i].float())
-                spatFeat.append(helper)
-        
-        # fuse together to get mu and sgm
-        spatiotemp = torch.stack(spatFeat, dim = 1) 
-
-        out = self.LSTM(spatiotemp)
-
-        return out
-
-
-class HRRadarPose(nn.Module):
-    def __init__(self):
-        super(HRRadarPose, self).__init__()
-
-        # oroginal model by ho et al. 
-
-        # backbone 
-        self.backbone = HighResolution3DNet(
-            cfg_4D["hr_tiny_feat64_zyx_l4_in64"], full_res_stem=True)
-        
-        self.bottleNeck = nn.Sequential(
-                nn.Conv3d(in_channels=384, out_channels=32, kernel_size=(1, 1, 8), stride=(1, 1, 8)),  # 3x3x3 conv
-                nn.BatchNorm3d(32),  # Batch normalization
-                nn.ReLU(inplace=True),  # ReLU activation
-
-                nn.Conv3d(in_channels=32, out_channels=8, kernel_size=(1, 1, 8), stride=(1, 1, 8)),  # 3x3x3 conv
-                nn.BatchNorm3d(8),  # Batch normalization
-                nn.ReLU(inplace=True),  # ReLU activation
-
-                nn.Flatten(start_dim = 1, end_dim = -1), 
-                nn.Linear(128, 78)
-            )
-
-    
-
-    def preProcess(self, 
-                   x: torch.Tensor):
-        x = x - torch.mean(x, dim = -1, keepdim = True)
-        x = torch.fft.fftn(x, dim=(0, 1, 2, 3), norm="forward")
-        x = x.permute(0, 4, 1, 2, 3) 
-        return x
-    
-    def applyBackbone(self, x: torch.Tensor):
-        out = self.backbone(x)
-        return out[0]
-    
-
-    def forward(self, x: torch.Tensor):
-        x = self.preProcess(x)
-        x = torch.cat([x.real, x.imag], dim = 1)
-        x = self.bottleNeck(self.applyBackbone(x))
-        return x
     
 if __name__ == "__main__":
     # radproposer
-    model = RadProPoser().float()
+    model = RadProPoserVAE().float()
     
-    testData = torch.rand(10, 8, 4, 4, 64, 128)
-    out = model.forwardInference(testData)
-    out = model(testData)
-    for i in out:
-        print(i.size())
+    testData = torch.complex(torch.rand(10, 8, 128, 4, 4, 64), torch.rand(10, 8, 128, 4, 4, 64))
 
-    # CNN-LSTM
-    model = CNN_LSTM().float()
+    for i in range(5):
+        _, _, kld = model(testData)
+        print(kld)
+        
+
     
-    testData = torch.rand(5, 8, 4, 4, 64, 128)
-    out = model(testData)
-    print(out.size())
+        
 
-    # ho et al. 
-    model = HRRadarPose().float()
-    testData = torch.rand(5, 4, 4, 64, 128)
-    out = model(testData)
-    print(out.size())
+    
+
