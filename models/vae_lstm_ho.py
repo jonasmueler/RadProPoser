@@ -444,10 +444,10 @@ class RadProPoserVAE(nn.Module):
         self.Nsamples = 500
 
         # decoder 
-        self.decoder = nn.Sequential(ResidualMLP(256),
-                                     nn.GELU(),
+        self.decoder = nn.Sequential(#ResidualMLP(256),
+                                     #nn.GELU(),
                                      nn.Linear(256, 128),
-                                     ResidualMLP(128), 
+                                     #ResidualMLP(128), 
                                      nn.Linear(128, 78))
     
     def sample(self, mu: torch.Tensor, logvar: torch.Tensor, device: str = "cuda") -> torch.Tensor:
@@ -459,7 +459,7 @@ class RadProPoserVAE(nn.Module):
     def preProcess(self, 
                    x: torch.Tensor):
         x = x - torch.mean(x, dim = -1, keepdim = True)
-        x = torch.fft.fftn(x, dim=(0, 1, 2, 3), norm="forward")
+        x = torch.fft.fft(torch.fft.fft(torch.fft.fft(torch.fft.fft(x ,dim = -1,  norm = "forward"), dim = -2,  norm = "forward"), dim = -3,  norm = "forward"), dim = -4,  norm = "forward")
         x = x.permute(0, 1, 5, 2, 3, 4) 
         return x
 
@@ -490,8 +490,8 @@ class RadProPoserVAE(nn.Module):
     
     def getLatent(self, x: torch.Tensor)-> tuple[torch.Tensor, torch.Tensor]:
         # fft layer 
-        #x = self.preProcess(x) # watch out with batch = 1
-        #device = x.device
+        x = self.preProcess(x) # watch out with batch = 1
+        device = x.device
 
         # part in real and imag
         xComp = [x.real, x.imag]
@@ -513,7 +513,7 @@ class RadProPoserVAE(nn.Module):
     def forward(self, 
                 x: torch.Tensor):
         # fft layer 
-        #x = self.preProcess(x) # watch out with batch = 1
+        x = self.preProcess(x) # watch out with batch = 1
         device = x.device
 
         # part in real and imag
@@ -536,7 +536,8 @@ class RadProPoserVAE(nn.Module):
         muOut = torch.mean(samples, dim = 1)
         varOut = torch.var(samples, dim = 1)
 
-        return self.decoder(self.sample(mu, sigma)), mu, sigma, muOut, varOut
+        #return self.decoder(self.sample(mu, sigma)), mu, sigma, muOut, varOut
+        return None, mu, sigma, muOut, varOut
 
 
 class ResidualMLP(nn.Module):

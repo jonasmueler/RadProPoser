@@ -2,14 +2,14 @@ import os
 
 ## globals
 SEQLEN = 8
-MODELNAME = "RadProPoserLinPad"
+MODELNAME = "RadProPoserVAE"
 
 ############################################### HPE #######################################################################
 ## model paramas
 #RadProPoserVAE
 # define hyperparameters
 
-TRAINCONFIG = {"learningRate": 0.0001, 
+TRAINCONFIG = {"learningRate": 0.001, 
           "weightDecay": 0.0001,
           "epochs": 24, 
           "batchSize": 16, 
@@ -19,7 +19,7 @@ TRAINCONFIG = {"learningRate": 0.0001,
           "lrDecay": 0.99, 
           "beta": 20, 
           "gamma": 5, # 5 
-          "nll": False,
+          "nll": True,
           "evd": False,
           "nf": False
 

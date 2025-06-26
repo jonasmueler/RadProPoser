@@ -1,0 +1,46 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.so
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Environment
+.env
+.venv/
+env/
+venv/
+
+# PyTorch / model checkpoints
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# Logs and experiment outputs
+wandb/
+trainedModels/
+*.log
+*.out
+
+# Config / temp / local runs
+*.yaml
+*.yml
+*.toml
+*.json
+*.tmp
+
+# VSCode / IDE
+.vscode/
+.idea/
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Ignore your compiled C/C++ if any
+*.o
+*.a
+*.out

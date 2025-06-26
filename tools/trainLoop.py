@@ -259,7 +259,7 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                 # generator loss
                 preds, mu, logVar, muOut, varOut = model.forward(radar)
                 KLloss = KLLoss(mu, logVar) 
-                nLL, pen = nllLoss_precision(gt, muOut, varOut)
+                nLL, pen = nllLoss(gt, muOut, varOut)
                 loss = nLL + TRAINCONFIG["beta"] * KLloss
 
             elif TRAINCONFIG["nf"] == True:
