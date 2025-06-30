@@ -8,7 +8,7 @@ import seaborn as sns
 import pandas as pd
 from scipy.stats import norm, gaussian_kde
 
-def compute_calibration_and_sharpness(mu, var, gt, num_bins=50):
+def compute_calibration_and_sharpness(mu, var, gt, num_bins=500):
     """
     Compute calibration error based on Kuleshov et al. (Accurate Uncertainties for Deep Learning Using Calibrated Regression).
     """
@@ -135,6 +135,7 @@ def plot_calibration_coverage(
         yticks_cleaned = [y for y in yticks if not np.isclose(y, 0.0)]
         ax.set_yticks(yticks_cleaned)
 
+    plt.show()
 
 
 

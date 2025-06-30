@@ -507,23 +507,12 @@ class RadProPoserEvidential(nn.Module):
 
 if __name__ == "__main__":
     # radproposer
-    model = RadProPoser().float()
+    model = RadProPoserEvidential().float()
     
     testData = torch.rand(10, 8, 4, 4, 64, 128)
-    out = model.forwardInference(testData)
+    out = model.forward(testData)
     out = model(testData)
     for i in out:
         print(i.size())
 
-    # CNN-LSTM
-    model = CNN_LSTM().float()
-    
-    testData = torch.rand(5, 8, 4, 4, 64, 128)
-    out = model(testData)
-    print(out.size())
 
-    # ho et al. 
-    model = HRRadarPose().float()
-    testData = torch.rand(5, 4, 4, 64, 128)
-    out = model(testData)
-    print(out.size())
