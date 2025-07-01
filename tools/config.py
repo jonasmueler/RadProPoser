@@ -9,7 +9,7 @@ MODELNAME = "RadProPoserVAE"
 #RadProPoserVAE
 # define hyperparameters
 
-TRAINCONFIG = {"learningRate": 0.001, 
+TRAINCONFIG = {"learningRate": 0.0001, 
           "weightDecay": 0.0001,
           "epochs": 24, 
           "batchSize": 16, 

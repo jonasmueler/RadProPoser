@@ -48,7 +48,7 @@ def loadCheckpoint(model: nn.Module,
         return model
 
 # load model 
-#CF = loadCheckpoint(CF, None, "/home/jonas/code/RadProPoser/trainedModels/humanPoseEstimation/RadProPoserEvidential1")
+CF = loadCheckpoint(CF, None, "/home/jonas/code/RadProPoser/trainedModels/humanPoseEstimation/RadProPoserVAE2")
 
 
 ## set seed 

@@ -1,234 +1,121 @@
 import torch
-import torch.nn as nn 
+import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 import os
-import trainLoop
 from tqdm import tqdm
-from config import *
 import sys
+from config import *
+import trainLoop
 
-def MPJPE(preds: torch.Tensor, 
-          targets: torch.Tensor, 
-          keypoints = False):
-    """
-    Calculate the Mean Per Joint Position Error (MPJPE).
+class RadarPoseTester:
+    def __init__(self,root_path: str, seq_len: int = SEQLEN, device: str = TRAINCONFIG["device"]):
+        self.root_path = root_path
+        self.seq_len = seq_len
+        self.device = device
 
-    Args:
-        preds (torch.Tensor): Predicted joint positions, 
-            shape (batch_size, num_joints, 3). Each joint position is a 3D 
-            coordinate (x, y, z).
-        targets (torch.Tensor): Ground truth joint positions, 
-            shape (batch_size, num_joints, 3). Must match the shape of `preds`.
-        keypoints (bool): If False, calculates and returns the overall MPJPE 
-            for all joints combined. If True, calculates MPJPE per keypoint 
-            separately.
-
-    Returns:
-        Tuple[float, float or torch.Tensor]: 
-            - mpjpe: The mean per joint position error. If `keypoints` is False, 
-              this is a single float value. If `keypoints` is True, it is a 
-              tensor containing errors for each keypoint.
-            - std: The standard deviation of the error, providing an uncertainty 
-              measure. If `keypoints` is False, this is a single float value. If 
-              `keypoints` is True, it is a tensor of standard deviations per keypoint.
-    """
-    assert preds.shape == targets.shape, "Predictions and targets must have the same shape"
-    
-    # Calculate the mean per joint position error
-    if keypoints == False:
-        # Calculate the Euclidean distance between predicted and target joint positions
-        preds = preds.reshape(preds.size(0), 26, 3)
-        #preds = preds - preds[:, 3, :].unsqueeze(dim = 1)
-
-        targets = targets.reshape(preds.size(0), 26, 3)
-        #targets = targets - targets[:, 3, :].unsqueeze(dim = 1)
-
+    @staticmethod
+    def compute_mpjpe(preds: torch.Tensor, targets: torch.Tensor, keypoints: bool = False):
+        preds = preds.view(preds.size(0), 26, 3)
+        targets = targets.view(targets.size(0), 26, 3)
 
         diff = preds - targets
         dist = torch.norm(diff, dim=-1)
 
-        mpjpe = dist.mean()
-        std = dist.std()
-    if keypoints == True:
-        # Calculate the Euclidean distance between predicted and target joint positions
-        diff = preds.reshape(preds.size(0), 26, 3) - targets.reshape(preds.size(0), 26, 3)
-        
-        dist = torch.norm(diff, dim=-1)
+        if keypoints:
+            return dist.mean(dim=0), dist.std(dim=0)
+        return dist.mean(), dist.std()
 
-        mpjpe = dist.mean(dim = 0)
-        std = dist.std(dim = 0)
-    
-    return mpjpe, std
+    def load_sequence(self, combination: list[str]):
+        radar_path = os.path.join(self.root_path, "radar", f"data_cube_parsed_{'_'.join(combination)}.npz")
+        skeleton_path = os.path.join(self.root_path, "skeletons", f"skeleton_{'_'.join(combination)}.npy")
 
-def testSeq(combination: list[str], # part, ang, act, rec
-            rootPath: str, 
-            model: nn.Module,
-            seqLen: int = SEQLEN, 
-            device: str = TRAINCONFIG["device"], 
-            keypointsFlag: bool = False, 
-            returnPreds: bool = False) -> torch.Tensor:
-    """
-    Evaluate a sequence of radar data using a specified model to predict keypoints 
-    and compute error metrics.
+        if not os.path.exists(radar_path) or not os.path.exists(skeleton_path):
+            return None, None
 
-    Parameters:
-    - combination (list[str]): A list of identifiers that specify the part, angle, 
-      activity, and recording to locate the corresponding radar and skeleton data.
-    - rootPath (str): The root directory path containing radar and skeleton data files.
-    - model (nn.Module): The PyTorch model used to predict keypoints from radar data.
-    - seqLen (int, optional): The sequence length to use for predictions. Defaults to SEQLEN.
-    - device (str, optional): The device (e.g., 'cuda' or 'cpu') for computation. Defaults to TRAINCONFIG["device"].
-    - keypointsFlag (bool, optional): Flag to indicate whether to use specific keypoint-based error metrics. Defaults to False.
-    - returnPreds (bool, optional): If True, return predictions along with error metrics. Defaults to False.
+        radar_npz = np.load(radar_path)
+        radar_tensor = torch.from_numpy(radar_npz[radar_npz.files[0]]).to(self.device).to(torch.complex64)
 
-    Returns:
-    - torch.Tensor: If returnPreds is False, returns a tuple (error, std, sigmas) where:
-        - error: Mean Per Joint Position Error (MPJPE) between predicted and ground truth keypoints.
-        - std: Standard deviation of errors.
-        - sigmas: Learned variance estimates from the model.
-      If returnPreds is True, also returns:
-        - preds: Predicted keypoints.
-    """
-    
-    # get radar data
-    path = os.path.join(rootPath, "radar",  "data_cube_parsed" + "_" + combination[0] + "_" + combination[1]  +  "_" + combination[2]+ "_" + combination[3] + ".npz")
-    if not os.path.exists(path):
-        return None
-    data = np.load(path)
-    radar = data.files[0]
-    radar = torch.from_numpy(data[radar]).to(device).to(torch.complex64)
+        skeleton_tensor = torch.from_numpy(np.load(skeleton_path)).float()
+        skeleton_tensor = skeleton_tensor.view(skeleton_tensor.shape[0], 26, 3) * 100
 
-    # get prediction
-    print("start predicting ", combination)
-    with torch.no_grad():
-        preds = []
-        sigmas = []
-        model.eval()
-        for i in tqdm(range(radar.size(0) - seqLen)):
-            inpt = radar[i:i+seqLen].unsqueeze(dim = 0) 
-            _,_,_,pred, sigma = model(inpt)
-            preds.append(pred)
-            sigmas.append(sigma)
+        return radar_tensor, skeleton_tensor
 
-    preds = torch.stack(preds, dim = 0).squeeze()
-    sigmas = torch.stack(sigmas, dim = 0).squeeze()
-    sigmas = torch.sum(sigmas.reshape(sigmas.size(0), 26, 3), dim = 2).squeeze()
+    def predict_sequence(self, combination: list[str], keypoints: bool = False, return_preds: bool = False):
+        radar, target = self.load_sequence(combination)
+        if radar is None or target is None:
+            return (None,) * 5
 
-    print("predictions done")
+        batch_size = 32
+        preds, vars = [], []
 
-    # get gt 
-    pathTarget = os.path.join(rootPath, "skeletons",  "skeleton" + "_" + combination[0]  + "_" + combination[1]  +  "_" + combination[2] + "_" + combination[3] + ".npy")
-    if not os.path.exists(pathTarget):
-        return None, None, None
-    dataTarget = np.load(pathTarget)
-    dataTarget = torch.from_numpy(dataTarget.reshape(dataTarget.shape[0], 26, 3)) * 100
-    gt = dataTarget[seqLen:, :, :].flatten(start_dim = 1, end_dim = -1).cuda() # change to 5 again TODO
+        self.model.eval()
+        with torch.no_grad():
+            for i in tqdm(range(0, radar.size(0) - self.seq_len, batch_size), desc=f"Predicting {'_'.join(combination)}"):
+                end = min(i + batch_size, radar.size(0) - self.seq_len)
+                batch = torch.stack([radar[j:j+self.seq_len] for j in range(i, end)])
+                _, _, _, mu, var = self.model(batch)
+                preds.append(mu)
+                vars.append(var)
 
-    
-    # get MPJPE
-    error, std = MPJPE(preds, gt, keypointsFlag)
-    
+        preds = torch.cat(preds, dim=0)
+        vars = torch.cat(vars, dim=0)
+        gts = target[self.seq_len:].reshape(-1, 26 * 3).to(self.device)
 
-    if returnPreds:
-        return error, std, sigmas, preds
-    else:
-        return error, std, sigmas # MPJPE, std of errors, learned vars
-    
-    
+        error, std = self.compute_mpjpe(preds, gts, keypoints)
+        print(error)
+        return error, std, preds, vars, gts
 
-def testLoss(testSetList: list[list[str]], 
-             rootPath: str, 
-             model: nn.Module,
-             keypointsFlag: bool) -> float:
-    """
-    Calculate the average test loss, standard deviation, and learned variances over a test dataset.
+    def evaluate(self, test_set: list[list[str]], keypoints: bool = False):
+        losses, stds, preds, vars, gts = [], [], [], [], []
 
-    Parameters:
-    - testSetList (list[list[str]]): A list of combinations, where each combination specifies the 
-      part, angle, activity, and recording for locating the corresponding radar and skeleton data.
-    - rootPath (str): The root directory path containing radar and skeleton data files.
-    - model (nn.Module): The PyTorch model used for predicting keypoints from radar data.
-    - keypointsFlag (bool): Flag to indicate whether to use specific keypoint-based error metrics.
+        for comb in test_set:
+            mean, std, pred, var, gt = self.predict_sequence(comb, keypoints)
+            if mean is not None:
+                losses.append(mean)
+                stds.append(std)
+                preds.append(pred)
+                vars.append(var)
+                gts.append(gt)
 
-    Returns:
-    - float: Returns a tuple (error, std, sigmas) where:
-        - error: The mean of the Mean Per Joint Position Errors (MPJPE) across all test sequences.
-        - std: The mean of the standard deviations of errors across all test sequences.
-        - sigmas: The mean of the learned variances across all test sequences.
-    """
-    
-    losses = []
-    stds = []
-    sigmas = []
-    for comb in testSetList:
-        mean, std, sigma = testSeq(comb, rootPath, model, keypointsFlag=keypointsFlag)
-        losses.append(mean)
-        stds.append(std)
-        sigmas.append(sigma)
+        error = torch.mean(torch.stack(losses), dim=0)
+        std = torch.mean(torch.stack(stds), dim=0)
+        preds = torch.cat(preds, dim=0)
+        vars = torch.cat(vars, dim=0)
+        gts = torch.cat(gts, dim=0)
 
-    removeNone = lambda lst: [item for item in lst if item is not None]
+        return error, std, preds, vars, gts
 
-    losses = removeNone(losses)
-    stds = removeNone(stds)
-    sigmas = removeNone(sigmas)
+    def run_evaluation(self, parts, angles, actions, reps, model_path: str):
+        sys.path.append(MODELPATH)
+        from vae_lstm_ho import RadProPoserVAE
+        self.model = RadProPoserVAE().to(self.device)
+        self.model = trainLoop.loadCheckpoint(self.model, None, model_path)
 
+        all_preds, all_gts, all_vars = [], [], []
 
-    error = torch.mean(torch.stack(losses, dim = 0), dim = 0)
-    std = torch.mean(torch.stack(stds, dim = 0), dim = 0)
-    sigmas = torch.mean(torch.stack(sigmas, dim = 0), dim = 0)
+        for part in parts:
+            for angle in angles:
+                combos = [[part, angle, act, rep] for act in actions for rep in reps]
+                error, std, preds, vars, gts = self.evaluate(combos)
 
-    return error, std, sigmas
+                all_preds.append(preds.cpu().numpy())
+                all_gts.append(gts.cpu().numpy())
+                all_vars.append(vars.cpu().numpy())
 
-
-def testingMainKeypoints():
-    ## LOAD MODEL HERE
-    sys.path.append(MODELPATH)
-    from models import RadProPoser as Encoder
-    #from models import CNN_LSTM as Encoder
-    #from models import HRRadarPose as Encoder
-    CF = Encoder().to(TRAINCONFIG["device"])
-
-    # load weights 
-    CF = trainLoop.loadCheckpoint(CF, None, os.path.join(HPECKPT, None)) # add trained HPE model name here 
-
-    # conditions
-    testPart = ["p12", "p2", "p1"]
-    angles = ["an0", "an1", "an2"]
-    actions = ["ac1", "ac2", "ac3", "ac4", "ac5", "ac6", "ac7", "ac8", "ac9"]
-    reps = ["r0", "r1"]
-
-
-    # prepare test run 
-    resDict = {"p12": {"an0": [], "an1": [], "an2": []}, 
-               "p2": {"an0": [], "an1": [], "an2": []}, 
-               "p1": {"an0": [], "an1": [], "an2": []}} 
-    
-    sigmaDict = {"p12": {"an0": [], "an1": [], "an2": []}, 
-               "p2": {"an0": [], "an1": [], "an2": []}, 
-               "p1": {"an0": [], "an1": [], "an2": []}} 
-
-
-    # testing
-    for part in testPart:
-        for an in angles:
-            combos = []
-            for ac in actions:
-                for r in reps:
-                    combos.append([part, an, ac, r])
-            out, _, sigmas = testLoss(combos,
-                                PATHORIGIN,
-                                CF, 
-                                keypointsFlag = False)
-            
-            # save in dictionary
-            resDict[part][an] = out
-            sigmaDict[part][an] = sigmas
-    
-    print("errors ", resDict)
-    print("uncertainties ", sigmaDict)
+        os.makedirs("prediction_data", exist_ok=True)
+        np.save("prediction_data/all_predictions_validation.npy", np.concatenate(all_preds, axis=0))
+        np.save("prediction_data/all_ground_truths_validation.npy", np.concatenate(all_gts, axis=0))
+        np.save("prediction_data/all_sigmas_validation.npy", np.concatenate(all_vars, axis=0))
 
 
 if __name__ == "__main__":
-    testingMainKeypoints()
-    
-                        
+    tester = RadarPoseTester(root_path=PATHRAW)
+
+    tester.run_evaluation(
+        parts=["p1"],
+        angles=["an0", "an1", "an2"],
+        actions=["ac1", "ac2", "ac3", "ac4", "ac5", "ac6", "ac7", "ac8", "ac9"],
+        reps=["r0", "r1"],
+        model_path=os.path.join(HPECKPT, "RadProPoserVAE3")
+    )
