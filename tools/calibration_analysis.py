@@ -1,27 +1,15 @@
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import List, Optional
+from typing import List, Optional, Callable
+from functools import partial
 
-from calibration_sharpness import *
-
-from scipy.stats import norm
+from scipy.stats import t, norm
 from sklearn.isotonic import IsotonicRegression
-from sklearn.linear_model import Ridge, Lasso, ElasticNet
-from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import KFold
-from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
 
-from sklearn.ensemble import (
-    RandomForestRegressor,
-    GradientBoostingRegressor,
-    HistGradientBoostingRegressor,
-    AdaBoostRegressor,
-    BaggingRegressor,
-)
-
-from sklearn.tree import DecisionTreeRegressor  # Needed for AdaBoost and Bagging
+# Optional: Only include these if you actually use them
+# from sklearn.linear_model import Ridge, Lasso, ElasticNet
 
 class MultiModelRecalibrationVisualizer:
     def __init__(self, num_dims: int):
@@ -293,7 +281,156 @@ class MultiModelRecalibrationVisualizer:
                 print(f"(Skipping sharpness: {model_type} is not a monotonic CDF model)")
 
 
-            
+class MultiModelRecalibrationVisualizer_tDist:
+    def __init__(self, num_dims: int):
+        self.num_dims = num_dims
+        self.models = {
+            "isotonic": [IsotonicRegression(out_of_bounds="clip") for _ in range(num_dims)],
+        }
+
+    def _get_cdf(self, mu: np.ndarray, v: np.ndarray, alpha: np.ndarray, beta: np.ndarray, gt: np.ndarray) -> np.ndarray:
+        df = 2 * alpha
+        scale = np.sqrt(beta * (1 + v) / (alpha * v))
+        return t.cdf(gt, df=df, loc=mu, scale=scale)
+
+    def _fit_models(self, mu: np.ndarray, v: np.ndarray, alpha: np.ndarray, beta: np.ndarray, gt: np.ndarray, clip_percentile: float = 0.01):
+        cdf = self._get_cdf(mu, v, alpha, beta, gt)
+        for model_type in self.models:
+            print(f"Fitting model type: {model_type}")
+            for d in range(self.num_dims):
+                x = cdf[:, d].reshape(-1)
+                y = np.array([(x <= val).mean() for val in x])
+                q_low, q_high = np.quantile(x, [clip_percentile, 1 - clip_percentile])
+                mask = (x >= q_low) & (x <= q_high)
+                x_clip = x[mask].reshape(-1, 1)
+                y_clip = y[mask]
+                model = self.models[model_type][d]
+                model.fit(x_clip, y_clip)
+
+    def _apply_model(self, mu: np.ndarray, v: np.ndarray, alpha: np.ndarray, beta: np.ndarray, gt: np.ndarray, model_type: str) -> np.ndarray:
+        cdf = self._get_cdf(mu, v, alpha, beta, gt)
+        recalibrated = np.zeros_like(cdf)
+        for d in range(self.num_dims):
+            recalibrated[:, d] = self.models[model_type][d].predict(cdf[:, d].reshape(-1, 1))
+        return recalibrated
+
+    def _compute_calibration_error(self, cdf: np.ndarray, num_bins: int = 100) -> float:
+        expected_p = np.linspace(0.01, 0.99, num_bins)
+        flat = cdf.flatten()
+        observed_p = np.array([(flat <= p).mean() for p in expected_p])
+        return np.mean(np.abs((observed_p - expected_p)))
+
+    def _plot_calibration_coverage(self, cdf_uncal: np.ndarray, cdf_cal_dict: dict, model_labels: List[str], num_bins: int = 50, font_scale: float = 4):
+        expected_p = np.linspace(0.0, 1.0, num_bins + 1)[1:-1]
+        base_fontsize = 10 * font_scale
+        plt.rcParams.update({
+            "font.family": "serif",
+            "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
+            "axes.titlesize": base_fontsize * 1.2,
+            "axes.labelsize": base_fontsize,
+            "xtick.labelsize": base_fontsize * 0.9,
+            "ytick.labelsize": base_fontsize * 0.9,
+            "legend.fontsize": base_fontsize * 0.9,
+        })
+
+        fig, ax = plt.subplots(figsize=(6, 6))
+
+        def plot_cdf(cdf_vals: np.ndarray, label: str):
+            flat = cdf_vals.flatten()
+            observed_p = [(flat <= q).mean() for q in expected_p]
+            ax.plot(expected_p, observed_p, label=label, linewidth=2)
+
+        plot_cdf(cdf_uncal, "Uncalibrated")
+        for method, cdf_vals in cdf_cal_dict.items():
+            plot_cdf(cdf_vals, f"Recalibrated ({method})")
+
+        ax.plot([0, 1], [0, 1], "k--", linewidth=1, label="Perfect Calibration")
+        ax.set_xlabel("Expected Confidence Level")
+        ax.set_ylabel("Observed Confidence Level")
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.set_aspect("equal")
+        ax.grid(True, linestyle=":")
+        ax.legend(frameon=False)
+        plt.show()
+
+    def run(self, mu: np.ndarray, v: np.ndarray, alpha: np.ndarray, beta: np.ndarray, gt: np.ndarray):
+        cdf_uncal = self._get_cdf(mu, v, alpha, beta, gt)
+        self._fit_models(mu, v, alpha, beta, gt)
+
+        cdf_calibrated = {
+            model_type: self._apply_model(mu, v, alpha, beta, gt, model_type)
+            for model_type in self.models
+        }
+
+        self._plot_calibration_coverage(
+            cdf_uncal=cdf_uncal,
+            cdf_cal_dict=cdf_calibrated,
+            model_labels=["Uncalibrated"] + [f"Recalibrated ({m})" for m in self.models.keys()],
+        )
+
+    def quantify_improvement(self, mu: np.ndarray, v: np.ndarray, alpha: np.ndarray, beta: np.ndarray, gt: np.ndarray):
+        cdf_uncal = self._get_cdf(mu, v, alpha, beta, gt)
+        self._fit_models(mu, v, alpha, beta, gt)
+
+        print(f"Calibration Error (Uncalibrated): {self._compute_calibration_error(cdf_uncal):.6f}")
+        for model_type in self.models:
+            cdf_cal = self._apply_model(mu, v, alpha, beta, gt, model_type)
+            err = self._compute_calibration_error(cdf_cal)
+            print(f"Calibration Error (Recalibrated - {model_type}): {err:.6f}")
+
+    def run_with_holdout(self, mu_train, v_train, alpha_train, beta_train, gt_train, mu_test, v_test, alpha_test, beta_test, gt_test):
+        self._fit_models(mu_train, v_train, alpha_train, beta_train, gt_train)
+        cdf_uncal = self._get_cdf(mu_test, v_test, alpha_test, beta_test, gt_test)
+
+        cdf_calibrated = {
+            model_type: self._apply_model(mu_test, v_test, alpha_test, beta_test, gt_test, model_type)
+            for model_type in self.models
+        }
+
+        self._plot_calibration_coverage(
+            cdf_uncal=cdf_uncal,
+            cdf_cal_dict=cdf_calibrated,
+            model_labels=["Uncalibrated"] + [f"Recalibrated ({m})" for m in self.models.keys()],
+        )
+
+    def quantify_improvement_with_holdout(self, mu_train, v_train, alpha_train, beta_train, gt_train, mu_test, v_test, alpha_test, beta_test, gt_test):
+        self._fit_models(mu_train, v_train, alpha_train, beta_train, gt_train)
+
+        # --- Uncalibrated ---
+        df_uncal = 2 * alpha_test
+        scale_uncal = np.sqrt(beta_test * (1 + v_test) / (alpha_test * v_test))
+        var_uncal = np.where(df_uncal > 2, scale_uncal**2 * df_uncal / (df_uncal - 2), np.nan)
+
+        cdf_uncal = self._get_cdf(mu_test, v_test, alpha_test, beta_test, gt_test)
+        unc_error = self._compute_calibration_error(cdf_uncal)
+        unc_sharpness_vec = np.nanmean(var_uncal)
+        print(f"Calibration Error (Uncalibrated): {unc_error:.6f}")
+        print(f"Sharpness (Uncalibrated): {unc_sharpness_vec:.6f}")
+
+        # --- Calibrated ---
+        for model_type in self.models:
+            print("################################# ", model_type, " ###########################################")
+            cdf_cal = self._apply_model(mu_test, v_test, alpha_test, beta_test, gt_test, model_type)
+            err = self._compute_calibration_error(cdf_cal)
+            print(f"Calibration Error (Recalibrated - {model_type}): {err:.6f}")
+
+            if model_type == "isotonic":
+                sharpness_vals = []
+                for d in range(self.num_dims):
+                    model = self.models[model_type][d]
+                    q_low, q_high = np.quantile(gt_test[:, d], [0.01, 0.99])
+                    y_support = np.linspace(q_low, q_high, 500)
+                    var_d = self._estimate_variance_from_isotonic(model, y_support)
+                    sharpness_vals.append(var_d)
+                sharpness_vec = np.sqrt(np.stack(sharpness_vals, axis=0))
+                print(f"Sharpness Vector (Recalibrated - {model_type}):")
+                print(sharpness_vec)
+                print("mean ", np.mean(sharpness_vec))
+            else:
+                print(f"(Skipping sharpness: {model_type} is not a monotonic CDF model)")
+
+                
 
 
 
@@ -314,24 +451,7 @@ def main():
     #visualizer.run(mu, var, gt)
     visualizer.quantify_improvement_with_holdout(mu_train, var_train, gt_train, 
                                                  mu_test, var_test, gt_test)
-    
 
-def main_test():
-    preds = [torch.from_numpy(np.load("prediction_data/all_predictions.npy")).unsqueeze(dim = 0)]
-    vars = [torch.from_numpy(np.load("prediction_data/all_sigmas.npy")).unsqueeze(dim = 0)]
-    gts = torch.from_numpy(np.load("prediction_data/all_ground_truths.npy")).unsqueeze(dim = 0)
-    
-    plot_calibration_coverage(preds, vars, gts)
-    
-    cal_error, sharpness, (expected, observed) = compute_calibration_and_sharpness(torch.from_numpy(np.load("prediction_data/all_predictions.npy")), 
-                                      torch.from_numpy(np.load("prediction_data/all_sigmas.npy")), 
-                                      torch.from_numpy(np.load("prediction_data/all_ground_truths.npy")))
-    
-    print(cal_error)
-    print(sharpness)
-    #print(expected)
-    #print(observed)
-    
     
 if __name__ == "__main__":
     main()
