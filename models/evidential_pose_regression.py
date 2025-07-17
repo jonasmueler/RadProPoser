@@ -447,15 +447,15 @@ class RadProPoserEvidential(nn.Module):
         #                         NormalInvGamma(128, 78))#
         self.out_uncertainty = nn.Sequential( 
                                  nn.Linear(2048, 256),
-                                 ResidualMLP(256),
+        #                         ResidualMLP(256),
                                  nn.Linear(256, 128), 
                                  NormalInvGamma(128, 78))
         
-        self.out = nn.Sequential( 
-                                 nn.Linear(2048, 256),
-                                 ResidualMLP(256),
-                                 nn.Linear(256, 128), 
-                                 nn.Linear(128, 78))
+        #self.out = nn.Sequential( 
+        #                         nn.Linear(2048, 256),
+        #                         ResidualMLP(256),
+        #                         nn.Linear(256, 128), 
+        #                         nn.Linear(128, 78))
     
     def preProcess(self, 
                    x: torch.Tensor):
@@ -484,7 +484,7 @@ class RadProPoserEvidential(nn.Module):
     def forward(self, 
                 x: torch.Tensor):
         # fft layer 
-        #x = self.preProcess(x) # watch out with batch = 1
+        x = self.preProcess(x) # watch out with batch = 1
         #device = x.device
 
         # part in real and imag
@@ -499,9 +499,9 @@ class RadProPoserEvidential(nn.Module):
         spatiotemp = torch.cat(spatFeat, dim = 1)
 
         out_uncertainty = self.out_uncertainty(spatiotemp)
-        out = self.out(spatiotemp)
+        #out = self.out(spatiotemp)
 
-        return out_uncertainty, out 
+        return out_uncertainty
 
 
 

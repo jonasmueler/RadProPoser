@@ -6,6 +6,7 @@ from hrnet3D_config_4D import MODEL_CONFIGS as cfg_4D
 from yacs.config import CfgNode as CN
 import torch
 from edl_pytorch import NormalInvGamma
+from torch.distributions import Laplace
 
 class HighResolutionModule(nn.Module):
     def __init__(
@@ -442,6 +443,7 @@ class RadProPoserVAE(nn.Module):
         self.sigma = nn.Sequential(nn.Linear(2048, 256))
         self.varianceScaling = nn.Parameter(torch.tensor(0.1))
         self.Nsamples = 500
+        self.latent_dist = "gaussian"
 
         # decoder 
         self.decoder = nn.Sequential(#ResidualMLP(256),
@@ -454,6 +456,24 @@ class RadProPoserVAE(nn.Module):
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std).to(device) * self.varianceScaling 
         return mu + eps * std
+    
+    def sample_laplace(self, 
+                       mu: torch.Tensor, 
+                       b_raw: torch.Tensor) -> torch.Tensor:
+        """
+        Sample from Laplace(mu, b), where b is passed as raw (unconstrained) values.
+        Softplus is applied to ensure positive scale.
+
+        Args:
+            mu: Mean tensor, shape (..., latent_dim)
+            b_raw: Raw (unconstrained) scale tensor, shape (..., latent_dim)
+
+        Returns:
+            z: Differentiable sample from Laplace(mu, b), same shape as mu
+        """
+        b = torch.nn.functional.softplus(b_raw) + 1e-6  # ensure b > 0
+        dist = Laplace(loc=mu, scale=b)
+        return dist.rsample()
 
     
     def preProcess(self, 
@@ -490,7 +510,7 @@ class RadProPoserVAE(nn.Module):
     
     def getLatent(self, x: torch.Tensor)-> tuple[torch.Tensor, torch.Tensor]:
         # fft layer 
-        x = self.preProcess(x) # watch out with batch = 1
+        #x = self.preProcess(x) # watch out with batch = 1
         device = x.device
 
         # part in real and imag
@@ -531,7 +551,12 @@ class RadProPoserVAE(nn.Module):
         mu = self.mu(spatiotemp)
         sigma = self.sigma(spatiotemp)
 
-        samples = self.decoder(torch.stack([self.sample(mu, sigma, device = device) for i in range(self.Nsamples)], dim = 1))
+        if self.latent_dist == "laplace":
+            samples = self.decoder(torch.stack([self.sample_laplace(mu, sigma) for i in range(self.Nsamples)], dim = 1))
+
+        
+        else: # gaussian
+            samples = self.decoder(torch.stack([self.sample(mu, sigma, device = device) for i in range(self.Nsamples)], dim = 1))
         
         muOut = torch.mean(samples, dim = 1)
         varOut = torch.var(samples, dim = 1)

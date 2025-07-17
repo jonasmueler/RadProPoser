@@ -92,6 +92,39 @@ def KLLoss(mu: torch.Tensor,
     klloss = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp()).mean()
     return klloss
 
+def kl_laplace_exact_full(mu_q: torch.Tensor,
+                          b_q: torch.Tensor,
+                          mu_p: float = 0.0,
+                          b_p: float = 1.0) -> torch.Tensor:
+    """
+    Compute the exact KL divergence D_KL(q || p) where:
+    - q ~ Laplace(mu_q, b_q)
+    - p ~ Laplace(mu_p, b_p) is a standard Laplace prior (default: mu=0, b=1)
+
+    Args:
+        mu_q: Posterior mean, shape (batch_size, latent_dim)
+        b_q: Posterior scale (> 0), shape (batch_size, latent_dim)
+        mu_p: Prior mean (scalar, default = 0)
+        b_p: Prior scale (scalar, default = 1)
+
+    Returns:
+        kl: Tensor of shape (batch_size,), summed KL per sample
+    """
+    # Ensure numerical stability
+    b_q = torch.clamp(b_q, min=1e-6)
+
+    delta = torch.abs(mu_q - mu_p)
+
+    kl = (
+        b_q * torch.exp(-delta / b_q) +       # term 1
+        delta / b_p +                         # term 2
+        torch.log(torch.tensor(b_p) / b_q) +  # term 3
+        b_q / b_p -                           # term 4
+        1                                     # constant term
+    )
+
+    return kl.mean()  # sum over latent dims for each sample
+
 def nllLoss(gt: torch.Tensor, 
             mu: torch.Tensor, 
             var: torch.Tensor) -> torch.Tensor:
@@ -114,6 +147,26 @@ def nllLoss(gt: torch.Tensor,
     loss = ((gt - mu) ** 2 / var).mean() + pen
 
     return loss, pen
+
+def nllLoss_elementwise(gt: torch.Tensor, 
+            mu: torch.Tensor, 
+            var: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Simplified NLL loss with late reduction for better control.
+
+    Args:
+        gt (torch.Tensor): Ground truth.
+        mu (torch.Tensor): Predicted mean.
+        var (torch.Tensor): Predicted variance.
+
+    Returns:
+        Tuple of (total loss, penalty term).
+    """
+    var = torch.clamp(var, min=1e-6)
+    nll = (gt - mu)**2 / var
+    pen = TRAINCONFIG["gamma"] * var
+    total = nll + pen
+    return total.mean(), pen.mean()
 
 def nllLoss_precision(gt: torch.Tensor, 
                         mu: torch.Tensor, 
@@ -146,6 +199,36 @@ def nllLoss_precision(gt: torch.Tensor,
     # Step 4: Final NLL computation
     nll = (pen + precision * (gt - mu) ** 2).mean() 
     return nll, pen
+
+
+def laplace_nll(
+    y_true: torch.Tensor,
+    mu_pred: torch.Tensor,
+    var_pred: torch.Tensor
+) -> torch.Tensor:
+    """
+    Laplace negative log-likelihood loss computed from empirical variance.
+
+    Assumes var_pred was estimated from multiple forward samples.
+
+    Args:
+        y_true (torch.Tensor): Ground truth tensor.
+        mu_pred (torch.Tensor): Empirical mean of predicted samples.
+        var_pred (torch.Tensor): Empirical variance of predicted samples.
+
+    Returns:
+        loss: Scalar loss averaged over batch and dimensions.
+        penalty: Scalar penalty term averaged separately (log_b term).
+    """
+    # Convert variance to Laplace scale: var = 2b² ⇒ b = sqrt(var / 2)
+    b = torch.sqrt(torch.clamp(var_pred, min=1e-10) / 2.0)
+
+    abs_error = torch.abs(y_true - mu_pred)
+    pen = TRAINCONFIG["gamma"] * b
+    loss = pen + abs_error / b
+
+    return loss.mean(), pen.mean()
+    
 
 def evidential_uncertainty(v: torch.Tensor, 
                            alpha: torch.Tensor, 
@@ -259,7 +342,9 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                 # generator loss
                 preds, mu, logVar, muOut, varOut = model.forward(radar)
                 KLloss = KLLoss(mu, logVar) 
-                nLL, pen = nllLoss(gt, muOut, varOut)
+                #KLloss = kl_laplace_exact_full(mu, logVar) 
+                #nLL, pen = nllLoss(gt, muOut, varOut)
+                nLL, pen = laplace_nll(gt, muOut, varOut)
                 loss = nLL + TRAINCONFIG["beta"] * KLloss
 
             elif TRAINCONFIG["nf"] == True:
@@ -270,18 +355,16 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
             
             elif TRAINCONFIG["evd"] == True:
                 # generator loss
-                pred_nig, pred = model(radar)
+                pred_nig = model(radar)
 
-                loss_uncertainty = evidential_regression(
+                loss = evidential_regression(
                         pred_nig,      # predicted Normal Inverse Gamma parameters
                         gt,             # target labels
                         lamb=TRAINCONFIG["lambda"],    # regularization coefficient 
                     )
                 
-                MSE = criterion(pred, gt)
 
-                loss = 10 * loss_uncertainty + MSE
-
+               
             else:
                 preds = model.forward(radar)
                 loss = criterion(preds, gt)
@@ -309,12 +392,10 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                         
             elif TRAINCONFIG["evd"] == True:
                 if WandB:
-                        wandb.log({"evidential_loss": loss_uncertainty, 
-                                   "loss": loss, 
+                        wandb.log({"evidential_loss": loss.detach().cpu().item(), 
                                    "v": pred_nig[1].mean(), 
                                    "alpha": pred_nig[2].mean(), 
-                                   "beta": pred_nig[3].mean(), 
-                                   "MSE": MSE.detach().cpu().item()})
+                                   "beta": pred_nig[3].mean()})
 
             else:
                 if WandB:
@@ -351,12 +432,13 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                 
                 elif TRAINCONFIG["evd"] == True:
                     # generator loss
-                    pred_nig, preds = model(x) # (mu, v, alpha, beta)
+                    preds = model(x) # (mu, v, alpha, beta)
+                    preds = preds[0]
                     var = evidential_uncertainty(pred_nig[1], pred_nig[2], pred_nig[3]) # epistemic uncertainty
 
-                    predictions.append(preds.detach().cpu())
-                    variances.append(var.detach().cpu())
-                    gts.append(y.detach().cpu())
+                    #predictions.append(preds.detach().cpu())
+                    #variances.append(var.detach().cpu())
+                    #gts.append(y.detach().cpu())
                     
 
                 else:

@@ -8,6 +8,21 @@ import sys
 from config import *
 import trainLoop
 
+def evidential_uncertainty(v: torch.Tensor, 
+                           alpha: torch.Tensor, 
+                           beta: torch.Tensor) -> torch.Tensor:
+    # Clamp for numerical stability
+    #v = torch.clamp(v, min=1.0)
+    #alpha = torch.clamp(alpha, min=1.1)
+    #beta = torch.clamp(beta, max=1e6)
+
+    aleatoric = beta / (alpha - 1)
+    epistemic = beta / (v * (alpha - 1))
+
+    #return aleatoric + epistemic
+    return aleatoric 
+
+
 class RadarPoseTester:
     def __init__(self,root_path: str, seq_len: int = SEQLEN, device: str = TRAINCONFIG["device"]):
         self.root_path = root_path
@@ -25,6 +40,74 @@ class RadarPoseTester:
         if keypoints:
             return dist.mean(dim=0), dist.std(dim=0)
         return dist.mean(), dist.std()
+    
+    def compute_p_mpjpe(self, preds: torch.Tensor, targets: torch.Tensor, keypoints: bool = False):
+        preds = preds.view(preds.size(0), 26, 3)
+        targets = targets.view(targets.size(0), 26, 3)
+
+        aligned_preds = torch.stack([
+            self.procrustes_torch(tgt, pred) for pred, tgt in zip(preds, targets)
+        ])
+
+        diff = aligned_preds - targets
+        dist = torch.norm(diff, dim=-1)
+
+        if keypoints:
+            return dist.mean(dim=0), dist.std(dim=0)
+        return dist.mean(), dist.std()
+    
+    def procrustes_torch(self, 
+                         X: torch.Tensor, 
+                         Y: torch.Tensor, 
+                         scaling: bool = True, 
+                         reflection: str = 'best'):
+        """
+        PyTorch implementation of Procrustes analysis. Aligns Y to X.
+        Inputs:
+            X: [N, 3] - target coordinates
+            Y: [N, 3] - input coordinates to align
+            scaling: bool - whether to apply scaling
+            reflection: 'best' | True | False - control reflection in the transform
+        Returns:
+            Z: [N, 3] - aligned Y
+        """
+        muX = X.mean(dim=0, keepdim=True)
+        muY = Y.mean(dim=0, keepdim=True)
+
+        X0 = X - muX
+        Y0 = Y - muY
+
+        ssX = (X0 ** 2).sum()
+        ssY = (Y0 ** 2).sum()
+
+        normX = torch.sqrt(ssX)
+        normY = torch.sqrt(ssY)
+
+        X0 /= normX
+        Y0 /= normY
+
+        A = X0.T @ Y0
+        U, S, Vt = torch.linalg.svd(A, full_matrices=False)
+        V = Vt.T
+        T = V @ U.T
+
+        if reflection != 'best':
+            have_reflection = torch.det(T) < 0
+            if reflection != have_reflection:
+                V[:, -1] *= -1
+                S[-1] *= -1
+                T = V @ U.T
+
+        traceTA = S.sum()
+
+        if scaling:
+            b = traceTA * normX / normY
+            Z = normX * traceTA * (Y0 @ T) + muX
+        else:
+            b = 1.0
+            Z = normY * (Y0 @ T) + muX
+
+        return Z
 
     def load_sequence(self, combination: list[str]):
         radar_path = os.path.join(self.root_path, "radar", f"data_cube_parsed_{'_'.join(combination)}.npz")
@@ -55,6 +138,9 @@ class RadarPoseTester:
                 end = min(i + batch_size, radar.size(0) - self.seq_len)
                 batch = torch.stack([radar[j:j+self.seq_len] for j in range(i, end)])
                 _, _, _, mu, var = self.model(batch)
+                #out = self.model(batch)
+                #mu = out[0]
+                #var = evidential_uncertainty(out[1], out[2], out[3])
                 preds.append(mu)
                 vars.append(var)
 
@@ -62,7 +148,7 @@ class RadarPoseTester:
         vars = torch.cat(vars, dim=0)
         gts = target[self.seq_len:].reshape(-1, 26 * 3).to(self.device)
 
-        error, std = self.compute_mpjpe(preds, gts, keypoints)
+        error, std = self.compute_p_mpjpe(preds, gts, keypoints)
         print(error)
         return error, std, preds, vars, gts
 
@@ -89,33 +175,50 @@ class RadarPoseTester:
     def run_evaluation(self, parts, angles, actions, reps, model_path: str):
         sys.path.append(MODELPATH)
         from vae_lstm_ho import RadProPoserVAE
+        #from evidential_pose_regression import RadProPoserEvidential
         self.model = RadProPoserVAE().to(self.device)
+        #self.model = RadProPoserEvidential().to(self.device)
         self.model = trainLoop.loadCheckpoint(self.model, None, model_path)
-
+        self.model.eval()
         all_preds, all_gts, all_vars = [], [], []
+        results_by_participant = {}
 
         for part in parts:
+            results_by_participant[part] = {}
             for angle in angles:
                 combos = [[part, angle, act, rep] for act in actions for rep in reps]
                 error, std, preds, vars, gts = self.evaluate(combos)
+
+                if isinstance(error, torch.Tensor):
+                    error = error.item() if error.numel() == 1 else error.cpu().numpy()
+                if isinstance(std, torch.Tensor):
+                    std = std.item() if std.numel() == 1 else std.cpu().numpy()
+
+                results_by_participant[part][angle] = {
+                    "error": error,
+                    "std": std
+                }
 
                 all_preds.append(preds.cpu().numpy())
                 all_gts.append(gts.cpu().numpy())
                 all_vars.append(vars.cpu().numpy())
 
         os.makedirs("prediction_data", exist_ok=True)
-        np.save("prediction_data/all_predictions_validation.npy", np.concatenate(all_preds, axis=0))
-        np.save("prediction_data/all_ground_truths_validation.npy", np.concatenate(all_gts, axis=0))
-        np.save("prediction_data/all_sigmas_validation.npy", np.concatenate(all_vars, axis=0))
+        np.save("prediction_data/all_predictions_validation_gaussian_laplace.npy", np.concatenate(all_preds, axis=0))
+        np.save("prediction_data/all_ground_truths_validation_gaussian_laplace.npy", np.concatenate(all_gts, axis=0))
+        np.save("prediction_data/all_sigmas_validation_gaussian_laplace.npy", np.concatenate(all_vars, axis=0))
 
+        return results_by_participant
 
 if __name__ == "__main__":
     tester = RadarPoseTester(root_path=PATHRAW)
 
-    tester.run_evaluation(
-        parts=["p1"],
+    res = tester.run_evaluation(
+        parts= ["p3"],
         angles=["an0", "an1", "an2"],
         actions=["ac1", "ac2", "ac3", "ac4", "ac5", "ac6", "ac7", "ac8", "ac9"],
         reps=["r0", "r1"],
-        model_path=os.path.join(HPECKPT, "RadProPoserVAE3")
+        model_path=os.path.join(HPECKPT, "/home/jonas/code/RadProPoser/trainedModels/humanPoseEstimation/VAE_Gaussian_Laplace/correct")
     )
+
+    print(res)

@@ -76,7 +76,7 @@ class RadarData(Dataset):
         ]  # List of available augmentations
         
         if self.mode == "train": 
-            self.participants = ["p3", 'p4', "p3" 'p5', 'p6', 'p7', 'p8', "p9", 'p10', "p11"] #['p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10', "p11"]
+            self.participants = ['p4', "p3" 'p5', 'p6', 'p7', 'p8', "p9", 'p10', "p11"] #['p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10', "p11"]
             self.angles = ["an0", "an1" , "an2"]
             self.actions = ["ac1", "ac2", "ac3","ac4","ac5","ac6","ac7","ac8", "ac9"]#, "ac10", "ac11"]#, "ac10", "ac11"]#, "ac10","ac11"]  #["ac0", "ac1" "ac2", "ac3","ac4","ac5","ac6","ac7","ac8","ac9","ac10","ac11"] 
             self.recording = ["r0", "r1"]
@@ -84,7 +84,7 @@ class RadarData(Dataset):
             
             
         if self.mode == "val":
-            self.participants = ["p1"]
+            self.participants = ["p3"]
             self.angles = ["an0", "an1" , "an2"]
             self.actions = ["ac1", "ac2", "ac3","ac4","ac5","ac6","ac7","ac8","ac9"] #, "ac10", "ac11"] #, "ac10", "ac11"]#, "ac10","ac11"] #["ac0", "ac1", "ac2", "ac3","ac4","ac5","ac6","ac7","ac8","ac9", "ac10","ac11"]
             self.recording = ["r0", "r1"]

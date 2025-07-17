@@ -2,13 +2,33 @@ import os
 
 ## globals
 SEQLEN = 8
-MODELNAME = "RadProPoserVAE"
+MODELNAME = "RadProPoser_Gauss_Laplce"
 
 ############################################### HPE #######################################################################
 ## model paramas
 #RadProPoserVAE
 # define hyperparameters
 
+# 20, 5 gaussian, 1,1 laplace, laplace gaussian 1, 5
+TRAINCONFIG = {"learningRate": 0.001, 
+          "weightDecay": 0.0001,
+          "epochs": 24, 
+          "batchSize": 16, 
+         "optimizer": "adam", 
+          "device": "cuda", 
+          "betas": (0.9, 0.999), # momentum and scaling for ADAM, 
+          "lrDecay": 0.99, 
+         "beta": 20, #20
+         "gamma": 5, # 5 
+          "nll": True,
+        "evd": False,
+          "nf": False
+          }
+
+          
+"""
+#RadProPoserEvidential
+# define hyperparameters
 TRAINCONFIG = {"learningRate": 0.0001, 
           "weightDecay": 0.0001,
           "epochs": 24, 
@@ -17,29 +37,12 @@ TRAINCONFIG = {"learningRate": 0.0001,
           "device": "cuda", 
           "betas": (0.9, 0.999), # momentum and scaling for ADAM, 
           "lrDecay": 0.99, 
-          "beta": 20, 
-          "gamma": 5, # 5 
-          "nll": True,
-          "evd": False,
+          "lambda":0.001, # 0.001
+          "nll": False,
+          "evd": True,
           "nf": False
-
           }
-
-#RadProPoserEvidential
-# define hyperparameters
-#TRAINCONFIG = {"learningRate": 0.0001, 
-#          "weightDecay": 0.0001,
-#          "epochs": 24, 
-#          "batchSize": 4, 
-#          "optimizer": "adam", 
-#          "device": "cuda", 
-#          "betas": (0.9, 0.999), # momentum and scaling for ADAM, 
-#          "lrDecay": 0.99, 
-#          "lambda":0.001, # 0.001
-#          "nll": False,
-#          "evd": True,
-#          "nf": False
-#          }
+"""
 
 # radproposer noermalizing flow 
 #TRAINCONFIG = {"learningRate": 0.0001, 
