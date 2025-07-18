@@ -13,7 +13,12 @@ import matplotlib.pyplot as plt
 from scipy.stats import t
 from sklearn.isotonic import IsotonicRegression
 from typing import List
+import numpy as np
+from scipy.stats import norm
+from scipy.interpolate import interp1d
 
+# Disable scientific notation
+np.set_printoptions(suppress=True)
 # Optional: Only include these if you actually use them
 # from sklearn.linear_model import Ridge, Lasso, ElasticNet
 
@@ -60,7 +65,7 @@ class MultiModelRecalibrationVisualizer:
             #],
         }
 
-    def _get_cdf(self, mu: np.ndarray, sigma: np.ndarray, gt: np.ndarray, laplace: bool = False) -> np.ndarray:
+    def _get_cdf(self, mu: np.ndarray, sigma: np.ndarray, gt: np.ndarray, laplace: bool = True) -> np.ndarray:
         if laplace is True:
             # Estimate Laplace scale parameter: b = sqrt(variance / 2)
             b = np.sqrt(sigma / 2)
@@ -255,6 +260,25 @@ class MultiModelRecalibrationVisualizer:
         var = np.sum(pdf_vals * (y_midpoints - mean) ** 2)
 
         return var
+    
+    def fast_nongaussian_variance(self, mu, sigma, recalibrator,
+                              L=4, G=200, P=200):
+
+        # 1. y-grid
+        y = np.linspace(mu - L*sigma, mu + L*sigma, G)
+        # 2. calibrated CDF
+        u = norm.cdf((y - mu) / sigma)
+        F_cal = np.clip(recalibrator.predict(u), 0, 1)
+        # 3. build inverse CDF
+        Q = interp1d(F_cal, y, bounds_error=False,
+                    fill_value=(y[0], y[-1]))
+        # 4. p-grid and quantiles
+        p = np.linspace(0.005, 0.995, P)
+        q = Q(p)
+        # 5. mean & variance
+        m = np.trapz(q, p)
+        v = np.trapz((q - m)**2, p)
+        return v
 
     
     def quantify_improvement_with_holdout(
@@ -268,7 +292,8 @@ class MultiModelRecalibrationVisualizer:
         # --- Uncalibrated ---
         cdf_uncal = self._get_cdf(mu_test, np.sqrt(var_test), gt_test)
         unc_error = self._compute_calibration_error(cdf_uncal)
-        unc_sharpness_vec = np.mean(np.sqrt(var_test))  # per-dim average σ²
+        #unc_sharpness_vec = np.mean(np.sqrt(var_test))  # per-dim average σ²
+        unc_sharpness_vec = np.mean(np.sum(var_test.reshape(var_test.shape[0], 26, 3), axis = -1))  # per-dim average σ²
         print(f"Calibration Error (Uncalibrated): {unc_error:.6f}")
         print(f"Sharpness (Uncalibrated): {unc_sharpness_vec}")
 
@@ -287,15 +312,43 @@ class MultiModelRecalibrationVisualizer:
                     # Use dense y support for numerical integration (per dimension)
                     #y_support = np.linspace(np.min(gt_test[:, d]), np.max(gt_test[:, d]), 500)
                     q_low, q_high = np.quantile(gt_test[:, d], [0.01, 0.99])
-                    y_support = np.linspace(q_low, q_high, 500)
-                    var_d = self._estimate_variance_from_isotonic(model, y_support)
+                    y_support = np.linspace(q_low, q_high, 100)
+                    var_d = self.fast_nongaussian_variance(
+                            mu=np.mean(mu_test[:, d]),
+                            sigma=np.mean(np.sqrt(var_test[:, d])),
+                            recalibrator=self.models['isotonic'][d]
+                        )#self._estimate_variance_from_isotonic(model, y_support)
                     sharpness_vals.append(var_d)
-                sharpness_vec = np.stack(sharpness_vals, axis=0)
+                sharpness_vec = np.sqrt(np.stack(sharpness_vals, axis=0))
                 print(f"Sharpness Vector (Recalibrated - {model_type}):")
-                print(np.sqrt(sharpness_vec))
-                print("mean ", np.mean(np.sqrt(sharpness_vec)))
+                #print(np.sqrt(sharpness_vec))
+                print(np.sum(sharpness_vec.reshape( 26,3), axis = -1))
+                
+                #print("mean ", np.mean(np.sqrt(sharpness_vec)))
+                print(np.mean(np.sum(sharpness_vec.reshape(26,3), axis = -1)))
+
             else:
                 print(f"(Skipping sharpness: {model_type} is not a monotonic CDF model)")
+
+    def fast_nongaussian_moments(mu, sigma, recalibrator,
+                             L=4, G=200, P=200):
+        """Return (mean_cal, var_cal) via quantile‐integration."""
+        # build y‐grid
+        y = np.linspace(mu - L*sigma, mu + L*sigma, G)
+        # calibrated CDF
+        u = norm.cdf((y - mu) / sigma)
+        F_cal = np.clip(recalibrator.predict(u), 0.0, 1.0)
+        # inverse CDF
+        Q = interp1d(F_cal, y, bounds_error=False,
+                    fill_value=(y[0], y[-1]))
+        # quantile grid
+        p = np.linspace(0.005, 0.995, P)
+        q = Q(p)
+        # mean & var
+        m = np.trapz(q, p)
+        v = np.trapz((q - m)**2, p)
+        return m, v
+
 
 
 
@@ -304,23 +357,23 @@ class MultiModelRecalibrationVisualizer:
 
 
 def main():
-    mu_train = np.load("prediction_data/all_predictions_validation_laplace_gaussian.npy")
-    var_train = np.load("prediction_data/all_sigmas_validation_laplace_gaussian.npy")
-    gt_train = np.load("prediction_data/all_ground_truths_validation_laplace_gaussian.npy")
+    mu_train = np.load("prediction_data/all_predictions_validation_laplace_laplace.npy")
+    var_train = np.load("prediction_data/all_sigmas_validation_laplace_laplace.npy")
+    gt_train = np.load("prediction_data/all_ground_truths_validation_laplace_laplace.npy")
 
-    mu_test = np.load("prediction_data/all_predictions_test_laplace_gaussian.npy")
-    var_test = np.load("prediction_data/all_sigmas_test_laplace_gaussian.npy")
-    gt_test = np.load("prediction_data/all_ground_truths_test_laplace_gaussian.npy")
+    mu_test = np.load("prediction_data/all_predictions_testing_laplace_laplace.npy")
+    var_test = np.load("prediction_data/all_sigmas_testing_laplace_laplace.npy")
+    gt_test = np.load("prediction_data/all_ground_truths_testing_laplace_laplace.npy")
 
     
     # Run recalibration and plot
     #visualizer = IsotonicRecalibrationVisualizer(num_dims=78)
     visualizer = MultiModelRecalibrationVisualizer(num_dims = 78)
     #visualizer.run(mu, var, gt)
-    #visualizer.quantify_improvement_with_holdout(mu_train, var_train, gt_train, 
-    #                                             mu_test, var_test, gt_test)
-    visualizer.run_with_holdout(mu_train, var_train, gt_train, 
+    visualizer.quantify_improvement_with_holdout(mu_train, var_train, gt_train, 
                                                  mu_test, var_test, gt_test)
+    #visualizer.run_with_holdout(mu_train, var_train, gt_train, 
+    #                                             mu_test, var_test, gt_test)
 
     
 if __name__ == "__main__":
