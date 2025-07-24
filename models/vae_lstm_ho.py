@@ -7,6 +7,7 @@ from yacs.config import CfgNode as CN
 import torch
 from edl_pytorch import NormalInvGamma
 from torch.distributions import Laplace
+from transformer import Transformer
 
 class HighResolutionModule(nn.Module):
     def __init__(
@@ -437,6 +438,8 @@ class RadProPoserVAE(nn.Module):
                 nn.Flatten(start_dim = 1, end_dim = -1)
             )
 
+        # transformer 
+        self.former = Transformer()
         
         # latent space 
         self.mu = nn.Sequential(nn.Linear(2048, 256))
@@ -544,8 +547,12 @@ class RadProPoserVAE(nn.Module):
                 helper = self.applyBackbone(elmt[:,i].float())
                 spatFeat.append(helper)
         
+        # process with ransformer layer
+        spatiotemp = torch.stack(spatFeat, dim = 1)
+        spatiotemp = self.former(spatiotemp).flatten(start_dim = 1, end_dim = -1)
+
         # fuse together to get mu and sgm
-        spatiotemp = torch.cat(spatFeat, dim = 1)
+        #spatiotemp = torch.cat(spatFeat, dim = 1)
 
         # get latent 
         mu = self.mu(spatiotemp)
@@ -589,11 +596,11 @@ class RadProPoserPad(nn.Module):
         self.bottleNeck = nn.Sequential(
                 nn.Conv3d(in_channels=384, out_channels=32, kernel_size=(1, 2, 8), stride=(1, 2, 8)),  # 3x3x3 conv
                 nn.BatchNorm3d(32),  # Batch normalization
-                nn.ReLU(inplace=True),  # ReLU activation
+                nn.ReLU(inplace=False),  # ReLU activation
 
                 nn.Conv3d(in_channels=32, out_channels=8, kernel_size=(1, 2, 8), stride=(1, 2, 8)),  # 3x3x3 conv
                 nn.BatchNorm3d(8),  # Batch normalization
-                nn.ReLU(inplace=True),  # ReLU activation
+                nn.ReLU(inplace=False),  # ReLU activation
 
                 nn.Flatten(start_dim = 1, end_dim = -1)
             )
@@ -847,7 +854,8 @@ class CNN_LSTM(nn.Module):
     def preProcess(self, 
                    x: torch.Tensor):
         x = x - torch.mean(x, dim = -1, keepdim = True)
-        x = torch.fft.fftn(x, dim=(0, 1, 2, 3), norm="forward")
+        x = torch.fft.fft(torch.fft.fft(torch.fft.fft(torch.fft.fft(x ,dim = -1,  norm = "forward"), dim = -2,  norm = "forward"), dim = -3,  norm = "forward"), dim = -4,  norm = "forward")
+
         x = x.permute(0, 1, 5, 2, 3, 4) 
         return x
 
@@ -932,11 +940,11 @@ class HRRadarPose(nn.Module):
     
 if __name__ == "__main__":
     # radproposer
-    model = RadProPoserPad().float().cuda()
+    model = RadProPoserVAE().float().cuda()
     
     testData = torch.rand(16, 8, 4, 4, 64, 128).cuda()
     out = model.forward(testData)
     
-    print(out.size())
+    print(out[1].size())
 
     

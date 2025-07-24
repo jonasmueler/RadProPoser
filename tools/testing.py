@@ -175,8 +175,10 @@ class RadarPoseTester:
     def run_evaluation(self, parts, angles, actions, reps, model_path: str):
         sys.path.append(MODELPATH)
         from vae_lstm_ho import RadProPoserVAE
+        #from vae_lstm_ho import CNN_LSTM
         #from evidential_pose_regression import RadProPoserEvidential
         self.model = RadProPoserVAE().to(self.device)
+        #self.model = CNN_LSTM().to(self.device)
         #self.model = RadProPoserEvidential().to(self.device)
         self.model = trainLoop.loadCheckpoint(self.model, None, model_path)
         self.model.eval()
@@ -204,9 +206,9 @@ class RadarPoseTester:
                 all_vars.append(vars.cpu().numpy())
 
         os.makedirs("prediction_data", exist_ok=True)
-        np.save("prediction_data/all_predictions_validation_gaussian_laplace.npy", np.concatenate(all_preds, axis=0))
-        np.save("prediction_data/all_ground_truths_validation_gaussian_laplace.npy", np.concatenate(all_gts, axis=0))
-        np.save("prediction_data/all_sigmas_validation_gaussian_laplace.npy", np.concatenate(all_vars, axis=0))
+        #np.save("prediction_data/all_predictions_validation_gaussian_laplace.npy", np.concatenate(all_preds, axis=0))
+        #np.save("prediction_data/all_ground_truths_validation_gaussian_laplace.npy", np.concatenate(all_gts, axis=0))
+        #np.save("prediction_data/all_sigmas_validation_gaussian_laplace.npy", np.concatenate(all_vars, axis=0))
 
         return results_by_participant
 
@@ -214,11 +216,11 @@ if __name__ == "__main__":
     tester = RadarPoseTester(root_path=PATHRAW)
 
     res = tester.run_evaluation(
-        parts= ["p3"],
+        parts= ["p1", "p2", "p12"],
         angles=["an0", "an1", "an2"],
         actions=["ac1", "ac2", "ac3", "ac4", "ac5", "ac6", "ac7", "ac8", "ac9"],
         reps=["r0", "r1"],
-        model_path=os.path.join(HPECKPT, "/home/jonas/code/RadProPoser/trainedModels/humanPoseEstimation/VAE_Gaussian_Laplace/correct")
+        model_path=os.path.join(HPECKPT, "/home/jonas/code/RadProPoser/trainedModels/humanPoseEstimation/RPP_Gauss_gauss_final9")
     )
 
     print(res)

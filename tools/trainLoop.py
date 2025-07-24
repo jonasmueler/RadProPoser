@@ -343,8 +343,8 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                 preds, mu, logVar, muOut, varOut = model.forward(radar)
                 KLloss = KLLoss(mu, logVar) 
                 #KLloss = kl_laplace_exact_full(mu, logVar) 
-                #nLL, pen = nllLoss(gt, muOut, varOut)
-                nLL, pen = laplace_nll(gt, muOut, varOut)
+                nLL, pen = nllLoss(gt, muOut, varOut)
+                #nLL, pen = laplace_nll(gt, muOut, varOut)
                 loss = nLL + TRAINCONFIG["beta"] * KLloss
 
             elif TRAINCONFIG["nf"] == True:
@@ -371,7 +371,7 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
 
 
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
             optimizer.step()
             trainCounter += 1
 

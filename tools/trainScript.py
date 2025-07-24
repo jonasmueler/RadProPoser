@@ -13,7 +13,7 @@ import torch.nn as nn
 sys.path.append(MODELPATH)
 #from evidential_pose_regression import RadProPoserEvidential as Encoder
 from vae_lstm_ho import RadProPoserVAE as Encoder
-#from models import CNN_LSTM as Encoder
+#from vae_lstm_ho import CNN_LSTM as Encoder
 #from models import HRRadarPose as Encoder
 
 CF = Encoder().to(TRAINCONFIG["device"])
@@ -101,7 +101,7 @@ MSE = torch.nn.MSELoss()
 
 
 if __name__ == "__main__":
-    setSeed(42)
+    #setSeed(42)
     trainLoop.trainLoop(dataTrain,
               dataVal, 
               CF,

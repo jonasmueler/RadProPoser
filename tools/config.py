@@ -2,12 +2,14 @@ import os
 
 ## globals
 SEQLEN = 8
-MODELNAME = "RadProPoser_Gauss_Laplce"
+MODELNAME = "RPP_Gauss_gauss_final"
 
 ############################################### HPE #######################################################################
 ## model paramas
 #RadProPoserVAE
 # define hyperparameters
+
+
 
 # 20, 5 gaussian, 1,1 laplace, laplace gaussian 1, 5
 TRAINCONFIG = {"learningRate": 0.001, 
@@ -75,6 +77,8 @@ TRAINCONFIG = {"learningRate": 0.0001,
           "betas": (0.9, 0.999), # momentum and scaling for ADAM, 
           "lrDecay": 0.99, 
           "nll": False,
+          "evd": False,
+          "nf": False
           }
 """
 ## Ho et al
@@ -104,6 +108,6 @@ CLASSIFIERCONFIG = {"batch_size": 32,
 PATHORIGIN = "/home/jonas/code/RadProPoser"
 MODELPATH = os.path.join(PATHORIGIN, "models")
 PATHLATENT = os.path.join(PATHORIGIN, "data", "latentData")
-PATHRAW = "/home/jonas/data/radarPose/radar_raw_data"
+PATHRAW = "/home/jonas/data/radarPose/mmRadPose_rawdata"
 ACTIVITYCLASSIFICATIONCKPT = os.path.join(PATHORIGIN, "trainedModels", "activityClassification")
 HPECKPT = os.path.join(PATHORIGIN, "trainedModels", "humanPoseEstimation")
