@@ -172,11 +172,87 @@ class RadarPoseTester:
 
         return error, std, preds, vars, gts
 
+    def evaluate_single(
+        self,
+        test_set: list[list[str]],
+        keypoints: bool = False,
+        batch_size: int = 32
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        For each combination in test_set, load its radar frames and targets,
+        predict point estimates in batches of size batch_size (μ only),
+        fill variances with zeros, compute p-MPJPE & std per combination,
+        then aggregate across all combinations.
+
+        Returns:
+            error (torch.Tensor): mean p-MPJPE over all combos
+            std   (torch.Tensor): mean std dev over all combos
+            preds (torch.Tensor): all μ preds stacked [N_total, 78]
+            vars  (torch.Tensor): zero variances [N_total, 78]
+            gts   (torch.Tensor): all ground truths [N_total, 78]
+        """
+        losses, stds = [], []
+        all_preds, all_vars, all_gts = [], [], []
+
+        for comb in test_set:
+            radar, target = self.load_sequence(comb)
+            if radar is None or target is None:
+                continue
+
+            preds_batches, gts_batches = [], []
+
+            self.model.eval()
+            with torch.no_grad():
+                total = radar.size(0)
+                for i in tqdm(range(0, total, batch_size), desc=f"Predicting {'_'.join(comb)}"):
+                    end = min(i + batch_size, total)
+                    batch_frames = radar[i:end].to(self.device)
+
+                    # If your model still requires a time dimension of length 1, uncomment:
+                    # batch_in = batch_frames.unsqueeze(1)  # [B,1,C,H,W]
+                    # Otherwise feed it directly:
+                    batch_in = batch_frames                     # [B,C,H,W]
+
+                    # forward: returns (_,_,_, μ, _)
+                    root, offset = self.model(batch_in)
+                    preds = root.unsqueeze(dim = 1) + offset
+                    preds = torch.cat([root.unsqueeze(dim = 1), preds], dim = 1)
+                    preds_batches.append(preds)
+
+                    gts_batch = target[i:end].reshape(-1, 26 * 3).to(self.device)
+                    gts_batches.append(gts_batch)
+
+            preds = torch.cat(preds_batches, dim=0)     # [N_frames, 78]
+            gts   = torch.cat(gts_batches,   dim=0)     # [N_frames, 78]
+            vars_ = torch.zeros_like(preds)             # zeros for var
+
+            # compute p-MPJPE & std for this comb
+            error, std = self.compute_mpjpe(preds, gts, keypoints)
+
+            losses.append(error)
+            stds.append(std)
+            all_preds.append(preds)
+            all_vars.append(vars_)
+            all_gts.append(gts)
+
+        # aggregate over combinations
+        error = torch.mean(torch.stack(losses), dim=0)
+        std   = torch.mean(torch.stack(stds),   dim=0)
+        preds = torch.cat(all_preds, dim=0)
+        vars  = torch.cat(all_vars,  dim=0)
+        gts   = torch.cat(all_gts,   dim=0)
+
+        return error, std, preds, vars, gts
+
+
+
     def run_evaluation(self, parts, angles, actions, reps, model_path: str):
         sys.path.append(MODELPATH)
         from vae_lstm_ho import RadProPoserVAE
         #from vae_lstm_ho import CNN_LSTM
+        #from vae_lstm_ho import HRRadarPose
         #from evidential_pose_regression import RadProPoserEvidential
+        #self.model = RadProPoserVAE().to(self.device)
         self.model = RadProPoserVAE().to(self.device)
         #self.model = CNN_LSTM().to(self.device)
         #self.model = RadProPoserEvidential().to(self.device)
@@ -190,6 +266,7 @@ class RadarPoseTester:
             for angle in angles:
                 combos = [[part, angle, act, rep] for act in actions for rep in reps]
                 error, std, preds, vars, gts = self.evaluate(combos)
+                
 
                 if isinstance(error, torch.Tensor):
                     error = error.item() if error.numel() == 1 else error.cpu().numpy()
@@ -206,9 +283,9 @@ class RadarPoseTester:
                 all_vars.append(vars.cpu().numpy())
 
         os.makedirs("prediction_data", exist_ok=True)
-        #np.save("prediction_data/all_predictions_validation_gaussian_laplace.npy", np.concatenate(all_preds, axis=0))
-        #np.save("prediction_data/all_ground_truths_validation_gaussian_laplace.npy", np.concatenate(all_gts, axis=0))
-        #np.save("prediction_data/all_sigmas_validation_gaussian_laplace.npy", np.concatenate(all_vars, axis=0))
+        np.save("prediction_data/all_predictions_testing_gauss_gauss.npy", np.concatenate(all_preds, axis=0))
+        np.save("prediction_data/all_ground_truths_testing_gauss_gauss.npy", np.concatenate(all_gts, axis=0))
+        np.save("prediction_data/all_sigmas_testing_gauss_gauss.npy", np.concatenate(all_vars, axis=0))
 
         return results_by_participant
 
@@ -216,11 +293,11 @@ if __name__ == "__main__":
     tester = RadarPoseTester(root_path=PATHRAW)
 
     res = tester.run_evaluation(
-        parts= ["p1", "p2", "p12"],
+        parts= ["p2", "p12"],#["p1"], #, "p2", "p12"],
         angles=["an0", "an1", "an2"],
         actions=["ac1", "ac2", "ac3", "ac4", "ac5", "ac6", "ac7", "ac8", "ac9"],
         reps=["r0", "r1"],
-        model_path=os.path.join(HPECKPT, "/home/jonas/code/RadProPoser/trainedModels/humanPoseEstimation/RPP_Gauss_gauss_final9")
+        model_path=os.path.join(HPECKPT, "/home/jonas/code/RadProPoser/trainedModels/humanPoseEstimation/RPP_gaussian_gaussian/correct")
     )
 
     print(res)

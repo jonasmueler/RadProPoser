@@ -16,7 +16,8 @@ from typing import List
 import numpy as np
 from scipy.stats import norm
 from scipy.interpolate import interp1d
-
+import os
+import joblib
 # Disable scientific notation
 np.set_printoptions(suppress=True)
 # Optional: Only include these if you actually use them
@@ -27,45 +28,32 @@ class MultiModelRecalibrationVisualizer:
         self.num_dims = num_dims
         self.models = {
             "isotonic": [IsotonicRegression(out_of_bounds="clip") for _ in range(num_dims)],
-            #"ridge": [Ridge() for _ in range(num_dims)],
-
-            # Random Forest (100 trees)
-            #"rf100": [RandomForestRegressor(n_estimators=50, random_state=42) for _ in range(num_dims)],
-
-            # Gradient Boosting
-            #"gb": [GradientBoostingRegressor(n_estimators=50, learning_rate=0.1, max_depth=3, random_state=42) for _ in range(num_dims)],
-
-            # Histogram Gradient Boosting (faster for larger datasets)
-            #"hgb": [HistGradientBoostingRegressor(max_iter=100, learning_rate=0.1, max_depth=3, random_state=42) for _ in range(num_dims)],
-
-            # AdaBoost with simple trees as base estimators
-            # Uncomment and import DecisionTreeRegressor if you want to enable
-            #"ada": [
-            #     AdaBoostRegressor(estimator=DecisionTreeRegressor(max_depth=3), n_estimators=50, random_state=42)
-            #     for _ in range(num_dims)
-            # ],
-
-            # Bagging with decision trees
-            # Uncomment and import DecisionTreeRegressor if you want to enable
-            #"bagging": [
-            #     BaggingRegressor(estimator=DecisionTreeRegressor(max_depth=None), n_estimators=50, random_state=42)
-            #     for _ in range(num_dims)
-             #],
-
-            # Gaussian Process
-            #"gp": [
-            #    GaussianProcessRegressor(
-            #        kernel=RBF(length_scale=1.0),
-            #        alpha=1e-3,  # noise level for numerical stability
-            #        normalize_y=True,
-            #        n_restarts_optimizer=0,
-            #        random_state=42,
-            #    )
-            #    for _ in range(num_dims)
-            #],
         }
 
-    def _get_cdf(self, mu: np.ndarray, sigma: np.ndarray, gt: np.ndarray, laplace: bool = True) -> np.ndarray:
+    def save_models(self, directory: str):
+        """
+        Serialize each model-type’s list of per-dimension regressors
+        to disk under `directory/`, one .pkl per model-type.
+        """
+        os.makedirs(directory, exist_ok=True)
+        for model_type, mdl_list in self.models.items():
+            path = os.path.join(directory, f"{model_type}.pkl")
+            joblib.dump(mdl_list, path)
+        print(f"Saved {len(self.models)} model types to '{directory}'")
+
+    def load_models(self, directory: str):
+        """
+        Load each model-type’s .pkl file from `directory/` back into self.models.
+        Expects files like `isotonic.pkl`, `rf100.pkl`, etc.
+        """
+        for model_type in list(self.models.keys()):
+            path = os.path.join(directory, f"{model_type}.pkl")
+            if not os.path.isfile(path):
+                raise FileNotFoundError(f"Could not find calibration file '{path}'")
+            self.models[model_type] = joblib.load(path)
+        print(f"Loaded {len(self.models)} model types from '{directory}'")
+
+    def _get_cdf(self, mu: np.ndarray, sigma: np.ndarray, gt: np.ndarray, laplace: bool = False) -> np.ndarray:
         if laplace is True:
             # Estimate Laplace scale parameter: b = sqrt(variance / 2)
             b = np.sqrt(sigma / 2)
@@ -288,6 +276,7 @@ class MultiModelRecalibrationVisualizer:
     ):
         """Fit on train set, report calibration error and per-dimension sharpness on test set."""
         self._fit_models(mu_train, var_train, gt_train)
+        self.save_models("calibrated_models")
 
         # --- Uncalibrated ---
         cdf_uncal = self._get_cdf(mu_test, np.sqrt(var_test), gt_test)
@@ -357,13 +346,13 @@ class MultiModelRecalibrationVisualizer:
 
 
 def main():
-    mu_train = np.load("prediction_data/all_predictions_validation_laplace_laplace.npy")
-    var_train = np.load("prediction_data/all_sigmas_validation_laplace_laplace.npy")
-    gt_train = np.load("prediction_data/all_ground_truths_validation_laplace_laplace.npy")
+    mu_train = np.load("prediction_data/all_predictions_validation_gauss_gauss.npy")
+    var_train = np.load("prediction_data/all_sigmas_validation_gauss_gauss.npy")
+    gt_train = np.load("prediction_data/all_ground_truths_validation_gauss_gauss.npy")
 
-    mu_test = np.load("prediction_data/all_predictions_testing_laplace_laplace.npy")
-    var_test = np.load("prediction_data/all_sigmas_testing_laplace_laplace.npy")
-    gt_test = np.load("prediction_data/all_ground_truths_testing_laplace_laplace.npy")
+    mu_test = np.load("prediction_data/all_predictions_testing_gauss_gauss.npy")
+    var_test = np.load("prediction_data/all_sigmas_testing_gauss_gauss.npy")
+    gt_test = np.load("prediction_data/all_ground_truths_testing_gauss_gauss.npy")
 
     
     # Run recalibration and plot

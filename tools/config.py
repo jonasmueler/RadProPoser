@@ -2,7 +2,7 @@ import os
 
 ## globals
 SEQLEN = 8
-MODELNAME = "RPP_Gauss_gauss_final"
+MODELNAME = "nf"
 
 ############################################### HPE #######################################################################
 ## model paramas
@@ -10,7 +10,7 @@ MODELNAME = "RPP_Gauss_gauss_final"
 # define hyperparameters
 
 
-
+"""
 # 20, 5 gaussian, 1,1 laplace, laplace gaussian 1, 5
 TRAINCONFIG = {"learningRate": 0.001, 
           "weightDecay": 0.0001,
@@ -26,7 +26,7 @@ TRAINCONFIG = {"learningRate": 0.001,
         "evd": False,
           "nf": False
           }
-
+"""
           
 """
 #RadProPoserEvidential
@@ -47,20 +47,20 @@ TRAINCONFIG = {"learningRate": 0.0001,
 """
 
 # radproposer noermalizing flow 
-#TRAINCONFIG = {"learningRate": 0.0001, 
-#          "weightDecay": 0.0001,
-#          "epochs": 24, 
-#          "batchSize": 32, 
-#          "optimizer": "adam", 
-#          "device": "cuda", 
-#          "betas": (0.9, 0.999), # momentum and scaling for ADAM, 
-#          "lrDecay": 0.99, 
-#          "gamma": 5,
-#          "beta": 50,
-#          "nll": False,
-#          "evd": False, 
-#          "nf": True
-#          }
+TRAINCONFIG = {"learningRate": 0.0001, 
+          "weightDecay": 0.0001,
+          "epochs": 24, 
+          "batchSize": 32, 
+          "optimizer": "adam", 
+          "device": "cuda", 
+          "betas": (0.9, 0.999), # momentum and scaling for ADAM, 
+          "lrDecay": 0.99, 
+          "gamma": 1,
+          "beta": 1,
+          "nll": False,
+          "evd": False, 
+          "nf": True
+          }
 
 
 
@@ -94,6 +94,9 @@ TRAINCONFIG = {"learningRate": 0.0001,
           "betas": (0.9, 0.999), # momentum and scaling for ADAM, 
           "lrDecay": 0.99, 
           "nll": False,
+          "evd": False,
+          "nf": False, 
+          "HR_SINGLE": True
           }
 """
 

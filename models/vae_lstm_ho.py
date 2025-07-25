@@ -906,7 +906,7 @@ class HRRadarPose(nn.Module):
             cfg_4D["hr_tiny_feat64_zyx_l4_in64"], full_res_stem=True)
         
         self.bottleNeck = nn.Sequential(
-                nn.Conv3d(in_channels=384, out_channels=32, kernel_size=(1, 1, 8), stride=(1, 1, 8)),  # 3x3x3 conv
+                nn.Conv3d(in_channels=64, out_channels=32, kernel_size=(1, 1, 8), stride=(1, 1, 8)),  # 3x3x3 conv
                 nn.BatchNorm3d(32),  # Batch normalization
                 nn.ReLU(inplace=True),  # ReLU activation
 
@@ -923,8 +923,10 @@ class HRRadarPose(nn.Module):
     def preProcess(self, 
                    x: torch.Tensor):
         x = x - torch.mean(x, dim = -1, keepdim = True)
-        x = torch.fft.fftn(x, dim=(0, 1, 2, 3), norm="forward")
-        x = x.permute(0, 4, 1, 2, 3) 
+        x = torch.fft.fft(torch.fft.fft(torch.fft.fft(torch.fft.fft(x ,dim = -1,  norm = "forward"), dim = -2,  norm = "forward"), dim = -3,  norm = "forward"), dim = -4,  norm = "forward")
+        
+        x = x.permute(0, 4, 1, 2, 3)
+        
         return x
     
     def applyBackbone(self, x: torch.Tensor):
@@ -936,7 +938,11 @@ class HRRadarPose(nn.Module):
         x = self.preProcess(x)
         x = torch.cat([x.real, x.imag], dim = 1)
         x = self.bottleNeck(self.applyBackbone(x))
-        return x
+        x = x.reshape(x.shape[0], 26, 3)
+        root = x[:, 0]
+        offsets = x[:, 1:]
+
+        return root, offsets
     
 if __name__ == "__main__":
     # radproposer

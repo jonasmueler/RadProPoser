@@ -348,10 +348,9 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                 loss = nLL + TRAINCONFIG["beta"] * KLloss
 
             elif TRAINCONFIG["nf"] == True:
-                    mu, var, kld = model.forward(radar, inference = False)
+                    mu, kld = model.forward(radar, inference = False)
 
-                    nll, pen = nllLoss_precision(gt, mu, var) 
-                    loss = nll + TRAINCONFIG["beta"] * kld
+                    loss = criterion(mu, gt) +  TRAINCONFIG["beta"] * kld
             
             elif TRAINCONFIG["evd"] == True:
                 # generator loss
@@ -362,7 +361,15 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                         gt,             # target labels
                         lamb=TRAINCONFIG["lambda"],    # regularization coefficient 
                     )
-                
+            
+            elif TRAINCONFIG["HR_SINGLE"] == True:
+                     root, offsets = model.forward(radar)
+                     gt = gt.reshape(gt.shape[0], 26, 3)
+                     loss_root = criterion(root, gt[:,0])
+                     gt_offset = gt - gt[:, 0].unsqueeze(dim = 1)
+                     loss_offset = criterion(gt_offset[:, 1:], offsets)
+
+                     loss = loss_root + loss_offset
 
                
             else:
@@ -385,9 +392,8 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                         
             elif TRAINCONFIG["nf"] == True:
                 if WandB:
-                        wandb.log({"nll": nll.detach().cpu().item(), 
+                        wandb.log({
                                    "loss": loss.detach().cpu().item(), 
-                                   "varPen": pen.detach().cpu().item(), 
                                    "KL": kld.detach().cpu().item()})
                         
             elif TRAINCONFIG["evd"] == True:
@@ -396,6 +402,10 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                                    "v": pred_nig[1].mean(), 
                                    "alpha": pred_nig[2].mean(), 
                                    "beta": pred_nig[3].mean()})
+
+            elif TRAINCONFIG["HR_SINGLE"] == True:
+                 if WandB:
+                        wandb.log({"MSE": loss.detach().cpu().item()})
 
             else:
                 if WandB:
@@ -424,11 +434,11 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
 
                 
                 elif TRAINCONFIG["nf"] == True:
-                    preds, var, kld = model.forward(x, inference = True)
+                    preds = model.forward(x, inference = True)
 
-                    predictions.append(preds.detach().cpu())
-                    variances.append(var.detach().cpu())
-                    gts.append(y.detach().cpu())
+                    #predictions.append(preds.detach().cpu())
+                    #variances.append(var.detach().cpu())
+                    #gts.append(y.detach().cpu())
                 
                 elif TRAINCONFIG["evd"] == True:
                     # generator loss
@@ -439,8 +449,12 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                     #predictions.append(preds.detach().cpu())
                     #variances.append(var.detach().cpu())
                     #gts.append(y.detach().cpu())
-                    
-
+                
+                elif TRAINCONFIG["HR_SINGLE"] == True:
+                     root, offset = model(x)
+                     preds = root.unsqueeze(dim = 1) + offset
+                     preds = torch.cat([root.unsqueeze(dim = 1), preds], dim = 1)
+                     y = y.reshape(y.size(0), 26, 3)
                 else:
                     preds = model.forward(x)
 

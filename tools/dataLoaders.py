@@ -85,7 +85,7 @@ class RadarData(Dataset):
             
         if self.mode == "val":
             self.participants = ["p12"]
-            self.angles = ["an0"]
+            self.angles = ["an0", "an1", "an2"]
             self.actions = ["ac1", "ac2", "ac3","ac4","ac5","ac6","ac7","ac8","ac9"] #, "ac10", "ac11"] #, "ac10", "ac11"]#, "ac10","ac11"] #["ac0", "ac1", "ac2", "ac3","ac4","ac5","ac6","ac7","ac8","ac9", "ac10","ac11"]
             self.recording = ["r0", "r1"]
             
@@ -132,9 +132,10 @@ class RadarData(Dataset):
                     dataTarget = dataTarget.reshape(dataTarget.shape[0], 26, 3)
                     
                     
-                    for b in range(radar.shape[0] - self.seqLen): # <--  use for overlapping sequences
+                    for b in range(radar.shape[0]- self.seqLen): # <--  use for overlapping sequences
                     #for b in range(0, radar.shape[0] - self.seqLen, int(self.seqLen/2)):
                         radarOut = radar[b:b + self.seqLen]
+                        #radarOut = radar[b]
                         radarTorch = torch.from_numpy(radarOut)
                         radarTorch = radarTorch.to(torch.complex64)
                         #radarTorch = preProcess(radarTorch)
@@ -147,6 +148,7 @@ class RadarData(Dataset):
                         # save target
                         # get gt
                         gt = torch.from_numpy(dataTarget[b + self.seqLen])
+                        #gt = torch.from_numpy(dataTarget[b])
                         torch.save(gt, os.path.join(self.trainPath, self.mode, "target", str(counter) + ".pth"))
 
 

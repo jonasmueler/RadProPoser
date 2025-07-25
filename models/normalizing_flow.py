@@ -12,6 +12,8 @@ from normflows import nets
 from normflows.flows import ActNorm
 from normflows.flows import ActNorm, Invertible1x1Conv
 from normflows.nets import MLP
+from transformer import Transformer
+
 
 class HighResolutionModule(nn.Module):
     def __init__(
@@ -453,28 +455,29 @@ class RadProPoserVAE(nn.Module):
         )
 
         # latent space 
-        self.mu = nn.Sequential(nn.LayerNorm(2048), nn.Linear(2048, 256))
-        self.sigma = nn.Sequential(nn.LayerNorm(2048), nn.Linear(2048, 256))
+        self.mu = nn.Sequential(nn.Linear(2048, 256))
+        self.sigma = nn.Sequential(nn.Linear(2048, 256))
         self.varianceScaling = nn.Parameter(torch.tensor(0.1))
 
+        self.former = Transformer()
+
         # decoder 
-        self.decoderMu = nn.Sequential(ResidualMLP(256), ResidualMLP(256), nn.Linear(256, 78))
-        self.decoderVar = nn.Sequential(ResidualMLP(256), ResidualMLP(256), nn.Linear(256, 78), torch.nn.Softplus())
+        self.decoder = nn.Sequential(nn.Linear(256, 128), nn.Linear(128, 78))
 
         # flow posterior setup with BatchNorm
         latent_dim = 256
         flows = []
         flow = "realNVP"
         if flow == "realNVP":
-            for i in range(8):
+            for i in range(4):
                 mask = torch.tensor(
                     [0, 1] * (latent_dim // 2) if i % 2 == 0 else [1, 0] * (latent_dim // 2),
                     dtype=torch.float32
                 ).to("cuda")
                 
                 # Input and output for s, t are half the latent_dim (due to masking)
-                s = MLP([latent_dim, latent_dim ], init_zeros = True)#, output_fn = "tanh")
-                t = MLP([latent_dim, latent_dim], init_zeros = True)#, output_fn = "tanh")
+                s = MLP([latent_dim, latent_dim ], output_fn = "tanh")
+                t = MLP([latent_dim, latent_dim], output_fn = "tanh")
                 
                 if i == 0:
                     flows.append(ActNorm(latent_dim))  # Optional: only once at the start
@@ -490,9 +493,10 @@ class RadProPoserVAE(nn.Module):
         eps = torch.randn_like(std).to(device) * self.varianceScaling 
         return mu + eps * std
 
-    def preProcess(self, x: torch.Tensor):
-        x = x - torch.mean(x, dim=-1, keepdim=True)
-        x = torch.fft.fftn(x, dim=(0, 1, 2, 3), norm="forward")
+    def preProcess(self, 
+                   x: torch.Tensor):
+        x = x - torch.mean(x, dim = -1, keepdim = True)
+        x = torch.fft.fft(torch.fft.fft(torch.fft.fft(torch.fft.fft(x ,dim = -1,  norm = "forward"), dim = -2,  norm = "forward"), dim = -3,  norm = "forward"), dim = -4,  norm = "forward")
         x = x.permute(0, 1, 5, 2, 3, 4) 
         return x
 
@@ -509,9 +513,13 @@ class RadProPoserVAE(nn.Module):
         return self.sample(mu, sigma)
 
     def getLatent(self, x: torch.Tensor)-> tuple[torch.Tensor, torch.Tensor]:
+        x = self.preProcess(x)
         xComp = [x.real, x.imag]
         spatFeat = [self.applyBackbone(elmt[:, i].float()) for elmt in xComp for i in range(elmt.size(1))]
-        spatiotemp = torch.cat(spatFeat, dim=1)
+        spatFeat = torch.stack(spatFeat, dim = 1)
+        spatFeat = self.former(spatFeat)
+        spatiotemp = spatFeat.flatten(start_dim = 1, end_dim = -1)
+        #spatiotemp = torch.cat(spatFeat, dim=1)
         mu = self.mu(spatiotemp)
         sigma = self.sigma(spatiotemp)
         return mu, sigma
@@ -523,9 +531,10 @@ class RadProPoserVAE(nn.Module):
         if inference == False:
             mu, logvar = self.getLatent(x)
             std = torch.exp(0.5 * logvar)
-            norm_scale = torch.randn_like(std) #* self.varianceScaling
-            z0 = mu + norm_scale * std
 
+            norm_scale = torch.randn_like(std).cuda() #* self.varianceScaling
+            z0 = mu + norm_scale * std
+            
             # Flow transformation
             zK, log_det = self.flows(z0)
             zK = zK.squeeze()
@@ -541,43 +550,67 @@ class RadProPoserVAE(nn.Module):
                 - log_det.view(-1)
             ).mean()
 
-            muOut = self.decoderMu(zK)
-            varOut = self.decoderVar(zK)
-        
+            muOut = self.decoder(zK)
+
+            return muOut, kld
+            
+        """
         if inference == True:
             mu, logvar = self.getLatent(x)
-            z0 = mu 
+            std = torch.exp(0.5 * logvar)
+            preds = []
+            for i in range(100):
+                norm_scale = torch.randn_like(std) #* self.varianceScaling
+                z0 = mu + norm_scale * std
 
-            # Flow transformation
-            zK, log_det = self.flows(z0)
-            zK = zK.squeeze()
+                # Flow transformation
+                zK, log_det = self.flows(z0)
+                zK = zK.squeeze()
 
-            # Distributions
-            q0 = torch.distributions.Normal(mu, torch.exp(0.5 * logvar))
-            p = torch.distributions.Normal(0.0, 1.0)
+                sample = self.decoder(zK)
+                preds.append(sample)
+            
+            mu_out = torch.mean(torch.stack(preds, dim = 1), dim = 1)
 
-            # KLD with flow
-            kld = (
-                -torch.sum(p.log_prob(zK), dim=-1)
-                + torch.sum(q0.log_prob(z0), dim=-1)
-                - log_det.view(-1)
-            ).mean()
+            return mu_out
 
-            muOut = self.decoderMu(zK)
-            varOut = self.decoderVar(zK)
+        """
+        if inference is True:
+            mu, logvar = self.getLatent(x)
+            std = torch.exp(0.5 * logvar)
 
-        return muOut, varOut, kld
+            n_samples = 100  # number of MC samples
+
+            # [B, 1, D] + [B, n_samples, D]
+            mu = mu.unsqueeze(1)                     # [B, 1, D]
+            std = std.unsqueeze(1)                   # [B, 1, D]
+            eps = torch.randn(mu.size(0), n_samples, mu.size(2), device=mu.device)  # [B, n_samples, D]
+
+            z0 = mu + eps * std                      # [B, n_samples, D]
+            z0 = z0.view(-1, z0.size(-1))            # [B * n_samples, D]
+
+            # Flow forward
+            zK, _ = self.flows(z0)                   # [B * n_samples, D]
+            decoded = self.decoder(zK)               # [B * n_samples, 78]
+
+            decoded = decoded.view(mu.size(0), n_samples, -1)  # [B, n_samples, 78]
+            mu_out = decoded.mean(dim=1)             # [B, 78]
+
+            return mu_out
+                
+
+        
 
     
 if __name__ == "__main__":
     # radproposer
-    model = RadProPoserVAE().float()
+    model = RadProPoserVAE().float().cuda()
     
-    testData = torch.complex(torch.rand(10, 8, 128, 4, 4, 64), torch.rand(10, 8, 128, 4, 4, 64))
+    testData = torch.rand(10, 8, 4, 4, 64, 128).cuda()
 
-    for i in range(5):
-        _, _, kld = model(testData)
-        print(kld)
+    
+    mu = model.forward(testData, inference = True)
+    print(mu.size())
         
 
     
