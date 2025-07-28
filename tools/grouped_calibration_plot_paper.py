@@ -23,6 +23,10 @@ class GroupedModelComparisonVisualizer:
         else:
             return norm.cdf(gt, loc=mu, scale=sigma)
 
+    def _get_cdf_from_samples(self, samples: np.ndarray, gt: np.ndarray) -> np.ndarray:
+        """Compute empirical CDF at ground truth from predictive samples (shape: [N, D, S])"""
+        return (samples <= gt[:, :, None]).mean(axis=2)
+
     def _compute_empirical_cdf(self, cdf: np.ndarray, num_bins: int = 100) -> Tuple[np.ndarray, np.ndarray]:
         expected_p = np.linspace(0.01, 0.99, num_bins)
         flat = cdf.flatten()
@@ -36,8 +40,12 @@ class GroupedModelComparisonVisualizer:
             label = entry['label']
             likelihood = entry['likelihood']
 
-            sigma = np.sqrt(var)
-            cdf = self._get_cdf(mu, sigma, gt, laplace=(likelihood == 'laplace'))
+            # Handle sample-based models (e.g., Normalizing Flow)
+            if 'cdf' in entry and entry['cdf'].ndim == 3:
+                cdf = self._get_cdf_from_samples(entry['cdf'], gt)
+            else:
+                sigma = np.sqrt(var)
+                cdf = self._get_cdf(mu, sigma, gt, laplace=(likelihood == 'laplace'))
 
             calibrators = []
             for d in range(self.num_dims):
@@ -56,11 +64,6 @@ class GroupedModelComparisonVisualizer:
         font_scale: float = 3.0,
         num_bins: int = 100,
     ):
-        """
-        Plot both calibrated and uncalibrated calibration curves per model.
-        model_data should contain keys: 'mu', 'var', 'gt', 'label', 'latent', 'likelihood'
-        """
-
         base_fontsize = 10 * font_scale
         plt.rcParams.update({
             "font.family": "serif",
@@ -83,13 +86,17 @@ class GroupedModelComparisonVisualizer:
             label = entry['label']
             latent = entry['latent']
             likelihood = entry['likelihood']
-            sigma = np.sqrt(var)
-            laplace_flag = (likelihood == 'laplace')
             model_key = (latent, likelihood)
             color = color_map[model_key]
 
             # Uncalibrated CDF
-            cdf_uncal = self._get_cdf(mu, sigma, gt, laplace=laplace_flag)
+            if 'cdf' in entry and entry['cdf'].ndim == 3:
+                cdf_uncal = self._get_cdf_from_samples(entry['cdf'], gt)
+            else:
+                sigma = np.sqrt(var)
+                laplace_flag = (likelihood == 'laplace')
+                cdf_uncal = self._get_cdf(mu, sigma, gt, laplace=laplace_flag)
+
             exp_p, obs_p = self._compute_empirical_cdf(cdf_uncal, num_bins)
             ax.plot(exp_p, obs_p, linestyle=linestyle_map[False], color=color, linewidth=2.5,
                     label=f"{label} (Uncal)")
@@ -112,9 +119,7 @@ class GroupedModelComparisonVisualizer:
         ax.set_ylim(0, 1)
         ax.set_aspect("equal")
         ax.grid(True, linestyle=":")
-        #ax.legend(frameon=False)
 
-        # reorder legend parameters
         handles, labels = ax.get_legend_handles_labels()
         def sort_key(label):
             if "Cal" in label:
@@ -128,13 +133,98 @@ class GroupedModelComparisonVisualizer:
 
         sorted_items = sorted(zip(handles, labels), key=lambda x: sort_key(x[1]))
         sorted_handles, sorted_labels = zip(*sorted_items)
-
         ax.legend(sorted_handles, sorted_labels, frameon=False)
-
 
         if save_path:
             plt.savefig(save_path, dpi=500)
         plt.show()
+
+    def plot_grouped_cdfs_2(
+        self,
+        model_data: List[Dict],
+        save_path: str = None,
+        font_scale: float = 3.0,
+        num_bins: int = 100,
+    ):
+        """
+        Plot uncalibrated and calibrated calibration curves side by side.
+        """
+
+        def format_label(latent: str, likelihood: str, label_fallback: str) -> str:
+            if label_fallback == "Evidential Regression":
+                return "Evidential Regression"
+            if label_fallback == "Normalizing Flow":
+                return "Normalizing Flow"
+            if latent.lower() in ["gaussian", "laplace"] and likelihood.lower() in ["gaussian", "laplace"]:
+                def fmt(x): return "Gauss." if x == "gaussian" else "Laplace"
+                return f"RPP {fmt(latent.lower())} {fmt(likelihood.lower())}"
+            return label_fallback
+
+        base_fontsize = 10 * font_scale
+        plt.rcParams.update({
+            "font.family": "serif",
+            "axes.titlesize": base_fontsize * 1.2,
+            "axes.labelsize": base_fontsize,
+            "xtick.labelsize": base_fontsize * 0.9,
+            "ytick.labelsize": base_fontsize * 0.9,
+            "legend.fontsize": base_fontsize * 0.9,
+        })
+
+        fig, (ax_uncal, ax_cal) = plt.subplots(1, 2, figsize=(36, 18))
+
+        # Collect formatted labels
+        model_keys = list({
+            format_label(m['latent'], m['likelihood'], m['label']) for m in model_data
+        })
+        cmap = cm.get_cmap("tab10", len(model_keys))
+        color_map = {key: to_hex(cmap(i)) for i, key in enumerate(model_keys)}
+
+        for entry in model_data:
+            label_raw = entry['label']
+            label = format_label(entry['latent'], entry['likelihood'], label_raw)
+            mu, var, gt = entry['mu'], entry['var'], entry['gt']
+            color = color_map[label]
+
+            # Get CDF
+            if 'cdf' in entry and entry['cdf'].ndim == 3:
+                cdf_uncal = self._get_cdf_from_samples(entry['cdf'], gt)
+            else:
+                sigma = np.sqrt(var)
+                laplace_flag = (entry['likelihood'] == 'laplace')
+                cdf_uncal = self._get_cdf(mu, sigma, gt, laplace=laplace_flag)
+
+            # Uncalibrated plot
+            exp_p, obs_p = self._compute_empirical_cdf(cdf_uncal, num_bins)
+            ax_uncal.plot(exp_p, obs_p, linestyle="-", color=color, linewidth=2.5, label=label)
+
+            # Calibrated plot
+            if label_raw not in self.models:
+                raise ValueError(f"Missing calibrator for model '{label_raw}'")
+            cdf_cal = np.zeros_like(cdf_uncal)
+            for d in range(self.num_dims):
+                model = self.models[label_raw][d]
+                cdf_cal[:, d] = model.predict(cdf_uncal[:, d])
+            exp_p, obs_p = self._compute_empirical_cdf(cdf_cal, num_bins)
+            ax_cal.plot(exp_p, obs_p, linestyle="-", color=color, linewidth=2.5, label=label)
+
+        for ax, title in zip([ax_uncal, ax_cal], ["a)", "b)"]):
+            ax.plot([0, 1], [0, 1], "k--", linewidth=1.5, label="Perfect Calibration")
+            ax.set_xlabel("Expected Confidence Level")
+            ax.set_ylabel("Observed Confidence Level")
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+            ax.set_aspect("equal")
+            ax.grid(True, linestyle=":")
+            ax.set_title(title, loc="left", fontsize=base_fontsize * 1.4)
+
+        # Legend only on uncalibrated plot
+        handles, labels = ax_uncal.get_legend_handles_labels()
+        ax_uncal.legend(handles, labels, frameon=False)
+
+        if save_path:
+            plt.savefig(save_path, dpi=500)
+        plt.show()
+
 
 
 def load_model_data(
@@ -144,6 +234,7 @@ def load_model_data(
     label: str,
     latent: str,
     likelihood: str,
+    **kwargs: str,
 ) -> Dict[str, Any]:
     """
     Load predictive model outputs and attach metadata for grouped calibration plots.
@@ -155,74 +246,99 @@ def load_model_data(
         label: Label used in the calibration plot legend
         latent: Type of latent distribution used in the model ('gaussian' or 'laplace')
         likelihood: Type of likelihood distribution ('gaussian' or 'laplace')
+        **kwargs: Additional named npy file paths (e.g., cdf_path='cdf_val_nf.npy')
 
     Returns:
         Dictionary with model predictions and descriptive metadata.
     """
-    mu = np.load(mu_path)
-    var = np.load(var_path)
-    gt = np.load(gt_path)
-
-    return {
-        "mu": mu,
-        "var": var,
-        "gt": gt,
+    data = {
+        "mu": np.load(mu_path),
+        "var": np.load(var_path),
+        "gt": np.load(gt_path),
         "label": label,
         "latent": latent.lower(),
         "likelihood": likelihood.lower(),
     }
 
+    # Load any additional arrays (like cdf, scores, etc.)
+    for key, path in kwargs.items():
+        data[key.replace("_path", "")] = np.load(path)
+
+    return data
+
 
 if __name__ == "__main__":
-    os.chdir('/home/jonas/code/RadProPoser/tools/prediction_data')
+    os.chdir('/home/jonas/code/RadProPoser/tools/calibration_analysis')
 
     # Replace this with the true output dimension of your dataset
     NUM_DIMS = 78
 
     val_model_data = [
-        load_model_data("all_predictions_validation_gaussian_gaussian.npy",
-                        "all_sigmas_validation_gaussian_gaussian.npy",
-                        "all_ground_truths_validation_gaussian_gaussian.npy",
+        load_model_data("mu_val_gauss_gauss.npy",
+                        "var_val_gauss_gauss.npy",
+                        "gt_val_gauss_gauss.npy",
                         label="Gauss–Gauss", latent="gaussian", likelihood="gaussian"),
 
-        load_model_data("all_predictions_validation_gaussian_laplace.npy",
-                        "all_sigmas_validation_gaussian_laplace.npy",
-                        "all_ground_truths_validation_gaussian_laplace.npy",
+        load_model_data("mu_val_gauss_laplace.npy",
+                        "var_val_gauss_laplace.npy",
+                        "gt_val_gauss_laplace.npy",
                         label="Gauss–Laplace", latent="gaussian", likelihood="laplace"),
 
-        load_model_data("all_predictions_validation_laplace_gaussian.npy",
-                        "all_sigmas_validation_laplace_gaussian.npy",
-                        "all_ground_truths_validation_laplace_gaussian.npy",
+        load_model_data("mu_val_laplace_gauss.npy",
+                        "var_val_laplace_gauss.npy",
+                        "gt_val_laplace_gauss.npy",
                         label="Laplace–Gauss", latent="laplace", likelihood="gaussian"),
 
-        load_model_data("all_predictions_validation_laplace_laplace.npy",
-                        "all_sigmas_validation_laplace_laplace.npy",
-                        "all_ground_truths_validation_laplace_laplace.npy",
+        load_model_data("mu_val_laplace_laplace.npy",
+                        "var_val_laplace_laplace.npy",
+                        "gt_val_laplace_laplace.npy",
                         label="Laplace–Laplace", latent="laplace", likelihood="laplace"),
+
+        load_model_data("mu_val_nf.npy",
+                "var_val_nf.npy",
+                "gt_val_nf.npy",
+                label="Normalizing Flow", latent="nf", likelihood="nf",
+                cdf_path="cdf_val_nf.npy"),
+        
+        load_model_data("mu_val_evd.npy",
+                        "var_val_evd.npy",
+                        "gt_val_evd.npy",
+                        label="Evidential Regression", latent="gaussian", likelihood="gaussian"),
     ]
 
     test_model_data = [
-        load_model_data("all_predictions_testing_gaussian_gaussian.npy",
-                        "all_sigmas_testing_gaussian_gaussian.npy",
-                        "all_ground_truths_testing_gaussian_gaussian.npy",
+        load_model_data("mu_testing_gauss_gauss.npy",
+                        "var_testing_gauss_gauss.npy",
+                        "gt_testing_gauss_gauss.npy",
                         label="Gauss–Gauss", latent="gaussian", likelihood="gaussian"),
 
-        load_model_data("all_predictions_testing_gaussian_laplace.npy",
-                        "all_sigmas_testing_gaussian_laplace.npy",
-                        "all_ground_truths_testing_gaussian_laplace.npy",
+        load_model_data("mu_testing_gauss_laplace.npy",
+                        "var_testing_gauss_laplace.npy",
+                        "gt_testing_gauss_laplace.npy",
                         label="Gauss–Laplace", latent="gaussian", likelihood="laplace"),
 
-        load_model_data("all_predictions_test_laplace_gaussian.npy",
-                        "all_sigmas_test_laplace_gaussian.npy",
-                        "all_ground_truths_test_laplace_gaussian.npy",
+        load_model_data("mu_testing_laplace_gauss.npy",
+                        "var_testing_laplace_gauss.npy",
+                        "gt_testing_laplace_gauss.npy",
                         label="Laplace–Gauss", latent="laplace", likelihood="gaussian"),
 
-        load_model_data("all_predictions_testing_laplace_laplace.npy",
-                        "all_sigmas_testing_laplace_laplace.npy",
-                        "all_ground_truths_testing_laplace_laplace.npy",
+        load_model_data("mu_testing_laplace_laplace.npy",
+                        "var_testing_laplace_laplace.npy",
+                        "gt_testing_laplace_laplace.npy",
                         label="Laplace–Laplace", latent="laplace", likelihood="laplace"),
+
+        load_model_data("mu_testing_nf.npy",
+                "var_testing_nf.npy",
+                "gt_testing_nf.npy",
+                label="Normalizing Flow", latent="nf", likelihood="nf",
+                cdf_path="cdf_testing_nf.npy"),
+
+        load_model_data("mu_testing_evd.npy",
+                        "var_testing_evd.npy",
+                        "gt_testing_evd.npy",
+                        label="Evidential Regression", latent="gaussian", likelihood="gaussian"),
     ]
 
     visualizer = GroupedModelComparisonVisualizer(num_dims=NUM_DIMS)
     visualizer.fit_calibrators(val_model_data)
-    visualizer.plot_grouped_cdfs(test_model_data, save_path="calibration_comparison.pdf")
+    visualizer.plot_grouped_cdfs_2(test_model_data, save_path="calibration_comparison.pdf")

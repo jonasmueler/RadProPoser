@@ -289,10 +289,10 @@ class RadarPoseTester:
                 all_cdfs.append(cdfs.cpu().numpy())
 
         os.makedirs("calibration_analysis", exist_ok=True)
-        np.save("calibration_analysis/mu_val_gauss_laplace.npy", np.concatenate(all_preds, axis=0))
-        np.save("calibration_analysis/gt_val_gauss_laplace.npy", np.concatenate(all_gts, axis=0))
-        np.save("calibration_analysis/var_val_gauss_laplace.npy", np.concatenate(all_vars, axis=0))
-        np.save("calibration_analysis/cdf_val_gauss_laplace.npy", np.concatenate(all_cdfs, axis=0))
+        np.save("calibration_analysis/mu_testing_laplace_gauss.npy", np.concatenate(all_preds, axis=0))
+        np.save("calibration_analysis/gt_testing_laplace_gauss.npy", np.concatenate(all_gts, axis=0))
+        np.save("calibration_analysis/var_testing_laplace_gauss.npy", np.concatenate(all_vars, axis=0))
+        np.save("calibration_analysis/cdf_testing_laplace_gauss.npy", np.concatenate(all_cdfs, axis=0))
 
         return results_by_participant
 
@@ -300,12 +300,12 @@ if __name__ == "__main__":
     tester = RadarPoseTester(root_path=PATHRAW)
 
     res = tester.run_evaluation(
-        parts= ["p1"], #["p2", "p12"],#["p1"], #, "p2", "p12"],
+        parts= ["p2", "p12"],#["p1"], #, "p2", "p12"],
         angles=["an0", "an1", "an2"],
         actions=["ac1", "ac2", "ac3", "ac4", "ac5", "ac6", "ac7", "ac8", "ac9"],
         reps=["r0", "r1"],
         model_path=os.path.join(HPECKPT, 
-                                "/home/jonas/code/RadProPoser/trainedModels/humanPoseEstimation/VAE_Gaussian_Laplace/correct")
+                                "/home/jonas/code/RadProPoser/trainedModels/humanPoseEstimation/RPP_laplace_gauss3")
     )
 
     print(res)
