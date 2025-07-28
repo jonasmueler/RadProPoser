@@ -341,11 +341,11 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
             if TRAINCONFIG["nll"] == True:
                 # generator loss
                 preds, mu, logVar, muOut, varOut = model.forward(radar)
-                KLloss = KLLoss(mu, logVar) 
+                #KLloss = KLLoss(mu, logVar) 
                 #KLloss = kl_laplace_exact_full(mu, logVar) 
                 nLL, pen = nllLoss(gt, muOut, varOut)
                 #nLL, pen = laplace_nll(gt, muOut, varOut)
-                loss = nLL + TRAINCONFIG["beta"] * KLloss
+                loss = nLL #+ TRAINCONFIG["beta"] * KLloss
 
             elif TRAINCONFIG["nf"] == True:
                     mu, kld = model.forward(radar, inference = False)
@@ -386,7 +386,7 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
             if TRAINCONFIG["nll"] == True:
                 if WandB:
                         wandb.log({"nll": nLL.detach().cpu().item(), 
-                                   "KLLOss": KLloss.detach().cpu().item(), 
+                                   #"KLLOss": KLloss.detach().cpu().item(), 
                                    "loss": loss.detach().cpu().item(), 
                                    "varPenalty": pen.detach().cpu().item()})
                         

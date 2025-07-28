@@ -53,7 +53,7 @@ class MultiModelRecalibrationVisualizer:
             self.models[model_type] = joblib.load(path)
         print(f"Loaded {len(self.models)} model types from '{directory}'")
 
-    def _get_cdf(self, mu: np.ndarray, sigma: np.ndarray, gt: np.ndarray, laplace: bool = False) -> np.ndarray:
+    def _get_cdf(self, mu: np.ndarray, sigma: np.ndarray, gt: np.ndarray, laplace: bool = True) -> np.ndarray:
         if laplace is True:
             # Estimate Laplace scale parameter: b = sqrt(variance / 2)
             b = np.sqrt(sigma / 2)
@@ -144,7 +144,7 @@ class MultiModelRecalibrationVisualizer:
         expected_p = np.linspace(0.01, 0.99, num_bins)
         flat = cdf.flatten()
         observed_p = np.array([(flat <= p).mean() for p in expected_p])
-        return np.mean(np.abs((observed_p - expected_p)))
+        return np.mean(np.abs(observed_p - expected_p))
 
     def run(self, mu: np.ndarray, var: np.ndarray, gt: np.ndarray):
         cdf_uncal = self._get_cdf(mu, np.sqrt(var), gt)
@@ -271,8 +271,8 @@ class MultiModelRecalibrationVisualizer:
     
     def quantify_improvement_with_holdout(
         self,
-        mu_train: np.ndarray, var_train: np.ndarray, gt_train: np.ndarray,
-        mu_test: np.ndarray, var_test: np.ndarray, gt_test: np.ndarray,
+        mu_train: np.ndarray, var_train: np.ndarray, gt_train: np.ndarray, 
+        mu_test: np.ndarray, var_test: np.ndarray, gt_test: np.ndarray
     ):
         """Fit on train set, report calibration error and per-dimension sharpness on test set."""
         self._fit_models(mu_train, var_train, gt_train)
@@ -281,8 +281,9 @@ class MultiModelRecalibrationVisualizer:
         # --- Uncalibrated ---
         cdf_uncal = self._get_cdf(mu_test, np.sqrt(var_test), gt_test)
         unc_error = self._compute_calibration_error(cdf_uncal)
-        #unc_sharpness_vec = np.mean(np.sqrt(var_test))  # per-dim average σ²
-        unc_sharpness_vec = np.mean(np.sum(var_test.reshape(var_test.shape[0], 26, 3), axis = -1))  # per-dim average σ²
+        unc_sharpness_vec = np.mean(np.sqrt(np.sum(var_test.reshape(var_test.shape[0], 26, 3), axis = -1)))  # per-dim average σ
+        unc_sharpness_vec_keys = np.sqrt(np.sum(np.mean(var_test.reshape(var_test.shape[0], 26, 3), axis = 0), axis = -1))
+        print(f"Calibration Error (Uncalibrated per key) ", unc_sharpness_vec_keys)
         print(f"Calibration Error (Uncalibrated): {unc_error:.6f}")
         print(f"Sharpness (Uncalibrated): {unc_sharpness_vec}")
 
@@ -308,13 +309,13 @@ class MultiModelRecalibrationVisualizer:
                             recalibrator=self.models['isotonic'][d]
                         )#self._estimate_variance_from_isotonic(model, y_support)
                     sharpness_vals.append(var_d)
-                sharpness_vec = np.sqrt(np.stack(sharpness_vals, axis=0))
+                sharpness_vec = np.stack(sharpness_vals, axis=0)
                 print(f"Sharpness Vector (Recalibrated - {model_type}):")
                 #print(np.sqrt(sharpness_vec))
-                print(np.sum(sharpness_vec.reshape( 26,3), axis = -1))
+                print(np.sqrt(np.sum(sharpness_vec.reshape( 26,3), axis = -1)))
                 
                 #print("mean ", np.mean(np.sqrt(sharpness_vec)))
-                print(np.mean(np.sum(sharpness_vec.reshape(26,3), axis = -1)))
+                print(np.mean(np.sqrt(np.sum(sharpness_vec.reshape(26,3), axis = -1))))
 
             else:
                 print(f"(Skipping sharpness: {model_type} is not a monotonic CDF model)")
@@ -338,22 +339,24 @@ class MultiModelRecalibrationVisualizer:
         v = np.trapz((q - m)**2, p)
         return m, v
 
-
-
-
-
-
-
-
 def main():
-    mu_train = np.load("prediction_data/all_predictions_validation_gauss_gauss.npy")
-    var_train = np.load("prediction_data/all_sigmas_validation_gauss_gauss.npy")
-    gt_train = np.load("prediction_data/all_ground_truths_validation_gauss_gauss.npy")
+    #mu_train = np.load("prediction_data/all_predictions_validation_gauss_gauss.npy")
+    #var_train = np.load("prediction_data/all_sigmas_validation_gauss_gauss.npy")
+    #gt_train = np.load("prediction_data/all_ground_truths_validation_gauss_gauss.npy")
 
-    mu_test = np.load("prediction_data/all_predictions_testing_gauss_gauss.npy")
-    var_test = np.load("prediction_data/all_sigmas_testing_gauss_gauss.npy")
-    gt_test = np.load("prediction_data/all_ground_truths_testing_gauss_gauss.npy")
+    #mu_test = np.load("prediction_data/all_predictions_testing_gauss_gauss.npy")
+    #var_test = np.load("prediction_data/all_sigmas_testing_gauss_gauss.npy")
+    #gt_test = np.load("prediction_data/all_ground_truths_testing_gauss_gauss.npy")
 
+    mu_train = np.load("calibration_analysis/mu_val_gauss_laplace.npy")
+    var_train = np.load("calibration_analysis/var_val_gauss_laplace.npy")
+    gt_train = np.load("calibration_analysis/gt_val_gauss_laplace.npy")
+    cdf_train = np.load("calibration_analysis/cdf_val_gauss_laplace.npy")
+
+    mu_test = np.load("calibration_analysis/mu_testing_gauss_laplace.npy")
+    var_test = np.load("calibration_analysis/var_testing_gauss_laplace.npy")
+    gt_test = np.load("calibration_analysis/gt_testing_gauss_laplace.npy")
+    cdf_test = np.load("calibration_analysis/cdf_testing_gauss_laplace.npy")
     
     # Run recalibration and plot
     #visualizer = IsotonicRecalibrationVisualizer(num_dims=78)

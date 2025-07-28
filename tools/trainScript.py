@@ -12,8 +12,8 @@ import torch.nn as nn
 ## LOAD MODEL HERE
 sys.path.append(MODELPATH)
 #from evidential_pose_regression import RadProPoserEvidential as Encoder
-#from vae_lstm_ho import HRRadarPose as Encoder
-from normalizing_flow import RadProPoserVAE as Encoder
+from vae_lstm_ho import RadProPoserVAE as Encoder
+#from normalizing_flow import RadProPoserVAE as Encoder
 #from vae_lstm_ho import CNN_LSTM as Encoder
 #from models import HRRadarPose as Encoder
 

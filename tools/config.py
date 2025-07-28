@@ -2,7 +2,7 @@ import os
 
 ## globals
 SEQLEN = 8
-MODELNAME = "nf"
+MODELNAME = "RPP_laplace_gauss"
 
 ############################################### HPE #######################################################################
 ## model paramas
@@ -10,7 +10,6 @@ MODELNAME = "nf"
 # define hyperparameters
 
 
-"""
 # 20, 5 gaussian, 1,1 laplace, laplace gaussian 1, 5
 TRAINCONFIG = {"learningRate": 0.001, 
           "weightDecay": 0.0001,
@@ -20,13 +19,13 @@ TRAINCONFIG = {"learningRate": 0.001,
           "device": "cuda", 
           "betas": (0.9, 0.999), # momentum and scaling for ADAM, 
           "lrDecay": 0.99, 
-         "beta": 20, #20
+         "beta": 1, #20
          "gamma": 5, # 5 
           "nll": True,
         "evd": False,
           "nf": False
           }
-"""
+
           
 """
 #RadProPoserEvidential
@@ -45,7 +44,7 @@ TRAINCONFIG = {"learningRate": 0.0001,
           "nf": False
           }
 """
-
+"""
 # radproposer noermalizing flow 
 TRAINCONFIG = {"learningRate": 0.0001, 
           "weightDecay": 0.0001,
@@ -61,7 +60,7 @@ TRAINCONFIG = {"learningRate": 0.0001,
           "evd": False, 
           "nf": True
           }
-
+"""
 
 
 

@@ -130,45 +130,51 @@ class RadarPoseTester:
             return (None,) * 5
 
         batch_size = 32
-        preds, vars = [], []
+        preds, vars, cdfs = [], [], []
 
         self.model.eval()
         with torch.no_grad():
             for i in tqdm(range(0, radar.size(0) - self.seq_len, batch_size), desc=f"Predicting {'_'.join(combination)}"):
                 end = min(i + batch_size, radar.size(0) - self.seq_len)
                 batch = torch.stack([radar[j:j+self.seq_len] for j in range(i, end)])
-                _, _, _, mu, var = self.model(batch)
+                #_, _, _, mu, var = self.model(batch)
                 #out = self.model(batch)
                 #mu = out[0]
                 #var = evidential_uncertainty(out[1], out[2], out[3])
+                mu, var, cdf = self.model(batch, inference = True)
                 preds.append(mu)
                 vars.append(var)
+                cdfs.append(cdf)
+
 
         preds = torch.cat(preds, dim=0)
         vars = torch.cat(vars, dim=0)
         gts = target[self.seq_len:].reshape(-1, 26 * 3).to(self.device)
+        cdfs = torch.cat(cdfs)
 
         error, std = self.compute_p_mpjpe(preds, gts, keypoints)
         print(error)
-        return error, std, preds, vars, gts
+        return error, std, preds, vars, gts, cdfs
 
     def evaluate(self, test_set: list[list[str]], keypoints: bool = False):
-        losses, stds, preds, vars, gts = [], [], [], [], []
+        losses, stds, preds, vars, gts, cdfs = [], [], [], [], [], []
 
         for comb in test_set:
-            mean, std, pred, var, gt = self.predict_sequence(comb, keypoints)
+            mean, std, pred, var, gt, cdf = self.predict_sequence(comb, keypoints)
             if mean is not None:
                 losses.append(mean)
                 stds.append(std)
                 preds.append(pred)
                 vars.append(var)
                 gts.append(gt)
+                cdfs.append(cdf)
 
         error = torch.mean(torch.stack(losses), dim=0)
         std = torch.mean(torch.stack(stds), dim=0)
         preds = torch.cat(preds, dim=0)
         vars = torch.cat(vars, dim=0)
         gts = torch.cat(gts, dim=0)
+        cdfs = torch.cat(cdfs, dim=0)
 
         return error, std, preds, vars, gts
 
@@ -248,7 +254,8 @@ class RadarPoseTester:
 
     def run_evaluation(self, parts, angles, actions, reps, model_path: str):
         sys.path.append(MODELPATH)
-        from vae_lstm_ho import RadProPoserVAE
+        #from vae_lstm_ho import RadProPoserVAE
+        from normalizing_flow import RadProPoserVAE
         #from vae_lstm_ho import CNN_LSTM
         #from vae_lstm_ho import HRRadarPose
         #from evidential_pose_regression import RadProPoserEvidential
@@ -258,14 +265,14 @@ class RadarPoseTester:
         #self.model = RadProPoserEvidential().to(self.device)
         self.model = trainLoop.loadCheckpoint(self.model, None, model_path)
         self.model.eval()
-        all_preds, all_gts, all_vars = [], [], []
+        all_preds, all_gts, all_vars, all_cdfs = [], [], [], []
         results_by_participant = {}
 
         for part in parts:
             results_by_participant[part] = {}
             for angle in angles:
                 combos = [[part, angle, act, rep] for act in actions for rep in reps]
-                error, std, preds, vars, gts = self.evaluate(combos)
+                error, std, preds, vars, gts, cdfs = self.evaluate(combos)
                 
 
                 if isinstance(error, torch.Tensor):
@@ -281,11 +288,13 @@ class RadarPoseTester:
                 all_preds.append(preds.cpu().numpy())
                 all_gts.append(gts.cpu().numpy())
                 all_vars.append(vars.cpu().numpy())
+                all_cdfs.append(cdfs.cpu().numpy())
 
-        os.makedirs("prediction_data", exist_ok=True)
-        np.save("prediction_data/all_predictions_testing_gauss_gauss.npy", np.concatenate(all_preds, axis=0))
-        np.save("prediction_data/all_ground_truths_testing_gauss_gauss.npy", np.concatenate(all_gts, axis=0))
-        np.save("prediction_data/all_sigmas_testing_gauss_gauss.npy", np.concatenate(all_vars, axis=0))
+        os.makedirs("calibration_analysis", exist_ok=True)
+        np.save("calibration_analysis/mu_testing_nf.npy", np.concatenate(all_preds, axis=0))
+        np.save("calibration_analysis/gt_testing_nf.npy", np.concatenate(all_gts, axis=0))
+        np.save("calibration_analysis/var_testing_nf.npy", np.concatenate(all_vars, axis=0))
+        np.save("calibration_analysis/cdf_testing_nf.npy", np.concatenate(all_cdfs, axis=0))
 
         return results_by_participant
 
@@ -297,7 +306,7 @@ if __name__ == "__main__":
         angles=["an0", "an1", "an2"],
         actions=["ac1", "ac2", "ac3", "ac4", "ac5", "ac6", "ac7", "ac8", "ac9"],
         reps=["r0", "r1"],
-        model_path=os.path.join(HPECKPT, "/home/jonas/code/RadProPoser/trainedModels/humanPoseEstimation/RPP_gaussian_gaussian/correct")
+        model_path=os.path.join(HPECKPT, "/home/jonas/code/RadProPoser/trainedModels/nf23")
     )
 
     print(res)
