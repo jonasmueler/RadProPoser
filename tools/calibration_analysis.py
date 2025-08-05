@@ -18,6 +18,8 @@ from scipy.stats import norm
 from scipy.interpolate import interp1d
 import os
 import joblib
+from scipy.stats import laplace
+from scipy.stats import pearsonr
 # Disable scientific notation
 np.set_printoptions(suppress=True)
 # Optional: Only include these if you actually use them
@@ -53,7 +55,7 @@ class MultiModelRecalibrationVisualizer:
             self.models[model_type] = joblib.load(path)
         print(f"Loaded {len(self.models)} model types from '{directory}'")
 
-    def _get_cdf(self, mu: np.ndarray, sigma: np.ndarray, gt: np.ndarray, laplace: bool = True) -> np.ndarray:
+    def _get_cdf(self, mu: np.ndarray, sigma: np.ndarray, gt: np.ndarray, laplace: bool = False) -> np.ndarray:
         if laplace is True:
             # Estimate Laplace scale parameter: b = sqrt(variance / 2)
             b = np.sqrt(sigma / 2)
@@ -249,40 +251,63 @@ class MultiModelRecalibrationVisualizer:
 
         return var
     
-    def fast_nongaussian_variance(self, mu, sigma, recalibrator,
-                              L=4, G=200, P=200):
+    def fast_nongaussian_variance(self, mu: float, sigma: float, recalibrator,
+                              L: float = 4, G: int = 200, P: int = 200,
+                              laplace_: bool = True) -> float:
+        """
+        Estimate recalibrated variance from a predictive distribution (Laplace or Gaussian),
+        using the calibrated inverse CDF obtained via a recalibrator.
 
+        Args:
+            mu: Predictive mean.
+            sigma: Predictive standard deviation.
+            recalibrator: Fitted recalibrator model with `predict()` method.
+            L: Range multiplier for the y-grid.
+            G: Number of points in the y-grid.
+            P: Number of points in the probability grid.
+            laplace: Whether to assume Laplace (True) or Gaussian (False) distribution.
+
+        Returns:
+            Estimated recalibrated variance.
+        """
         # 1. y-grid
-        y = np.linspace(mu - L*sigma, mu + L*sigma, G)
-        # 2. calibrated CDF
-        u = norm.cdf((y - mu) / sigma)
+        y = np.linspace(mu - L * sigma, mu + L * sigma, G)
+
+        # 2. Uncalibrated CDF: Laplace or Gaussian
+        if laplace_:
+            b = sigma / np.sqrt(2)  # Laplace scale parameter
+            u = laplace.cdf(y, loc=mu, scale=b)
+        else:
+            u = norm.cdf((y - mu) / sigma)
+
+        # 3. Calibrated CDF
         F_cal = np.clip(recalibrator.predict(u), 0, 1)
-        # 3. build inverse CDF
-        Q = interp1d(F_cal, y, bounds_error=False,
-                    fill_value=(y[0], y[-1]))
-        # 4. p-grid and quantiles
+
+        # 4. Inverse CDF
+        Q = interp1d(F_cal, y, bounds_error=False, fill_value=(y[0], y[-1]))
+
+        # 5. Compute quantiles and variance
         p = np.linspace(0.005, 0.995, P)
         q = Q(p)
-        # 5. mean & variance
         m = np.trapz(q, p)
-        v = np.trapz((q - m)**2, p)
+        v = np.trapz((q - m) ** 2, p)
         return v
 
     
     def quantify_improvement_with_holdout(
         self,
         mu_train: np.ndarray, var_train: np.ndarray, gt_train: np.ndarray, 
-        mu_test: np.ndarray, var_test: np.ndarray, gt_test: np.ndarray
+        mu_test: np.ndarray, var_test: np.ndarray, gt_test: np.ndarray, laplace_: bool = False
     ):
         """Fit on train set, report calibration error and per-dimension sharpness on test set."""
         self._fit_models(mu_train, var_train, gt_train)
         self.save_models("calibrated_models")
 
         # --- Uncalibrated ---
-        cdf_uncal = self._get_cdf(mu_test, np.sqrt(var_test), gt_test)
+        cdf_uncal = self._get_cdf(mu_test, np.sqrt(var_test), gt_test, laplace_)
         unc_error = self._compute_calibration_error(cdf_uncal)
-        unc_sharpness_vec = np.mean(np.sqrt(np.sum(var_test.reshape(var_test.shape[0], 26, 3), axis = -1)))  # per-dim average σ
-        unc_sharpness_vec_keys = np.sqrt(np.sum(np.mean(var_test.reshape(var_test.shape[0], 26, 3), axis = 0), axis = -1))
+        unc_sharpness_vec = np.mean(np.sum(var_test.reshape(var_test.shape[0], 26, 3), axis = -1))  # per-dim average σ
+        unc_sharpness_vec_keys = np.mean(np.sum(var_test.reshape(var_test.shape[0], 26, 3), -1), axis = 0)
         print(f"Calibration Error (Uncalibrated per key) ", unc_sharpness_vec_keys)
         print(f"Calibration Error (Uncalibrated): {unc_error:.6f}")
         print(f"Sharpness (Uncalibrated): {unc_sharpness_vec}")
@@ -306,16 +331,17 @@ class MultiModelRecalibrationVisualizer:
                     var_d = self.fast_nongaussian_variance(
                             mu=np.mean(mu_test[:, d]),
                             sigma=np.mean(np.sqrt(var_test[:, d])),
-                            recalibrator=self.models['isotonic'][d]
+                            recalibrator=self.models['isotonic'][d], 
+                            laplace_ = laplace_
                         )#self._estimate_variance_from_isotonic(model, y_support)
                     sharpness_vals.append(var_d)
                 sharpness_vec = np.stack(sharpness_vals, axis=0)
                 print(f"Sharpness Vector (Recalibrated - {model_type}):")
                 #print(np.sqrt(sharpness_vec))
-                print(np.sqrt(np.sum(sharpness_vec.reshape( 26,3), axis = -1)))
+                print(np.sum(sharpness_vec.reshape( 26,3), axis = -1))
                 
                 #print("mean ", np.mean(np.sqrt(sharpness_vec)))
-                print(np.mean(np.sqrt(np.sum(sharpness_vec.reshape(26,3), axis = -1))))
+                print(np.mean(np.sum(sharpness_vec.reshape(26,3), axis = -1)))
 
             else:
                 print(f"(Skipping sharpness: {model_type} is not a monotonic CDF model)")
@@ -338,6 +364,55 @@ class MultiModelRecalibrationVisualizer:
         m = np.trapz(q, p)
         v = np.trapz((q - m)**2, p)
         return m, v
+    
+    def quantify_recalibrated_uncertainty_correlation(
+        self,
+        mu: np.ndarray,
+        var: np.ndarray,
+        gt: np.ndarray,
+        model_type: str = "isotonic",
+        laplace_: bool = False
+    ):
+        """
+        Compute Pearson correlation between recalibrated uncertainty and joint errors.
+
+        Args:
+            mu: Mean predictions (N, D)
+            var: Variances (N, D)
+            gt: Ground truth (N, D)
+            model_type: Recalibration model to use (e.g., "isotonic")
+            laplace_: If True, assume Laplace base distribution; else Gaussian.
+        """
+        N, D = mu.shape
+        mu_torch = torch.tensor(mu)
+        gt_torch = torch.tensor(gt)
+        errors = torch.norm((mu_torch - gt_torch).view(N, 26, 3), dim=-1).numpy()  # shape (N, 26)
+
+        recalibrated_var = np.zeros((N, 26))
+        for j in range(26):
+            dims = slice(3*j, 3*j+3)
+            for i in range(N):
+                mu_joint = np.mean(mu[i, dims])
+                sigma_joint = np.mean(np.sqrt(var[i, dims]))
+                recalibrator = self.models[model_type][dims.start]  # any of the 3 dims has same model
+                recalibrated_var[i, j] = self.fast_nongaussian_variance(
+                    mu=mu_joint,
+                    sigma=sigma_joint,
+                    recalibrator=recalibrator,
+                    laplace_=laplace_
+                )
+
+        # Compute per-keypoint correlations
+        per_key_corr = np.zeros(26)
+        for j in range(26):
+            per_key_corr[j], _ = pearsonr(errors[:, j], recalibrated_var[:, j])
+
+        overall_corr, _ = pearsonr(errors.flatten(), recalibrated_var.flatten())
+
+        print("\n[Recalibrated Uncertainty vs Error Correlation]")
+        for j in range(26):
+            print(f"  Keypoint {j:02d}: r = {per_key_corr[j]:.3f}")
+        print(f"\n  Overall Pearson Correlation: r = {overall_corr:.3f}")
 
 def main():
     #mu_train = np.load("prediction_data/all_predictions_validation_gauss_gauss.npy")
@@ -348,24 +423,32 @@ def main():
     #var_test = np.load("prediction_data/all_sigmas_testing_gauss_gauss.npy")
     #gt_test = np.load("prediction_data/all_ground_truths_testing_gauss_gauss.npy")
 
-    mu_train = np.load("calibration_analysis/mu_val_gauss_laplace.npy")
-    var_train = np.load("calibration_analysis/var_val_gauss_laplace.npy")
-    gt_train = np.load("calibration_analysis/gt_val_gauss_laplace.npy")
-    cdf_train = np.load("calibration_analysis/cdf_val_gauss_laplace.npy")
+    mu_train = np.load("calibration_analysis/mu_val_gauss_gauss_cov.npy")
+    var_train = np.load("calibration_analysis/var_val_gauss_gauss_cov.npy")
+    gt_train = np.load("calibration_analysis/gt_val_gauss_gauss_cov.npy")
+    cdf_train = np.load("calibration_analysis/cdf_val_gauss_gauss_cov.npy")
 
-    mu_test = np.load("calibration_analysis/mu_testing_gauss_laplace.npy")
-    var_test = np.load("calibration_analysis/var_testing_gauss_laplace.npy")
-    gt_test = np.load("calibration_analysis/gt_testing_gauss_laplace.npy")
-    cdf_test = np.load("calibration_analysis/cdf_testing_gauss_laplace.npy")
+    mu_test = np.load("calibration_analysis/mu_testing_gauss_gauss_cov.npy")
+    var_test = np.load("calibration_analysis/var_testing_gauss_gauss_cov.npy")
+    gt_test = np.load("calibration_analysis/gt_testing_gauss_gauss_cov.npy")
+    cdf_test = np.load("calibration_analysis/cdf_testing_gauss_gauss_cov.npy")
     
     # Run recalibration and plot
     #visualizer = IsotonicRecalibrationVisualizer(num_dims=78)
     visualizer = MultiModelRecalibrationVisualizer(num_dims = 78)
     #visualizer.run(mu, var, gt)
     visualizer.quantify_improvement_with_holdout(mu_train, var_train, gt_train, 
-                                                 mu_test, var_test, gt_test)
+                                                 mu_test, var_test, gt_test, False)
     #visualizer.run_with_holdout(mu_train, var_train, gt_train, 
     #                                             mu_test, var_test, gt_test)
+
+    #visualizer.quantify_recalibrated_uncertainty_correlation(
+    #        mu=mu_test,
+    #        var=var_test,
+    #        gt=gt_test,
+    #        model_type="isotonic",
+    #        laplace_=False
+    #    )
 
     
 if __name__ == "__main__":

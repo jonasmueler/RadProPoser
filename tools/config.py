@@ -2,7 +2,7 @@ import os
 
 ## globals
 SEQLEN = 8
-MODELNAME = "RPP_laplace_gauss"
+MODELNAME = "RPP_Gauss_Gauss_Cov"
 
 ############################################### HPE #######################################################################
 ## model paramas
@@ -19,7 +19,7 @@ TRAINCONFIG = {"learningRate": 0.001,
           "device": "cuda", 
           "betas": (0.9, 0.999), # momentum and scaling for ADAM, 
           "lrDecay": 0.99, 
-         "beta": 1, #20
+         "beta": 20, #20
          "gamma": 5, # 5 
           "nll": True,
         "evd": False,

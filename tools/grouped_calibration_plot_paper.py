@@ -151,14 +151,25 @@ class GroupedModelComparisonVisualizer:
         """
 
         def format_label(latent: str, likelihood: str, label_fallback: str) -> str:
-            if label_fallback == "Evidential Regression":
-                return "Evidential Regression"
-            if label_fallback == "Normalizing Flow":
-                return "Normalizing Flow"
-            if latent.lower() in ["gaussian", "laplace"] and likelihood.lower() in ["gaussian", "laplace"]:
-                def fmt(x): return "Gauss." if x == "gaussian" else "Laplace"
-                return f"RPP {fmt(latent.lower())} {fmt(likelihood.lower())}"
-            return label_fallback
+            # Always keep Evidential and NF names
+            if label_fallback in ["Evidential Regression", "Normalizing Flow"]:
+                return label_fallback
+
+            # Base latent–likelihood combos without suffixes
+            base_combos = {
+                "gaussian-gaussian",
+                "gaussian-laplace",
+                "laplace-gaussian",
+                "laplace-laplace",
+            }
+            # Keep the label if it contains extra info beyond base combos
+            if label_fallback.lower().replace("–", "-") not in base_combos:
+                return label_fallback
+
+            # Otherwise format cleanly
+            def fmt(x):
+                return "Gauss." if x == "gaussian" else "Laplace"
+            return f"RPP {fmt(latent.lower())} {fmt(likelihood.lower())}"
 
         base_fontsize = 10 * font_scale
         plt.rcParams.update({
@@ -274,6 +285,10 @@ if __name__ == "__main__":
     NUM_DIMS = 78
 
     val_model_data = [
+        load_model_data("mu_val_gauss_gauss_cov.npy",
+                        "var_val_gauss_gauss_cov.npy",
+                        "gt_val_gauss_gauss_cov.npy",
+                        label="Gauss–Gauss-Cov", latent="gaussian", likelihood="gaussian"),
         load_model_data("mu_val_gauss_gauss.npy",
                         "var_val_gauss_gauss.npy",
                         "gt_val_gauss_gauss.npy",
@@ -307,6 +322,11 @@ if __name__ == "__main__":
     ]
 
     test_model_data = [
+        load_model_data("mu_testing_gauss_gauss_cov.npy",
+                        "var_testing_gauss_gauss_cov.npy",
+                        "gt_testing_gauss_gauss_cov.npy",
+                        label="Gauss–Gauss-Cov", latent="gaussian", likelihood="gaussian"),
+
         load_model_data("mu_testing_gauss_gauss.npy",
                         "var_testing_gauss_gauss.npy",
                         "gt_testing_gauss_gauss.npy",

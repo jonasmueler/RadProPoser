@@ -231,7 +231,7 @@ class RadarPoseTester:
             vars_ = torch.zeros_like(preds)             # zeros for var
 
             # compute p-MPJPE & std for this comb
-            error, std = self.compute_mpjpe(preds, gts, keypoints)
+            error, std = self.compute_p_mpjpe(preds, gts, keypoints)
 
             losses.append(error)
             stds.append(std)
@@ -252,13 +252,13 @@ class RadarPoseTester:
 
     def run_evaluation(self, parts, angles, actions, reps, model_path: str):
         sys.path.append(MODELPATH)
-        from vae_lstm_ho import RadProPoserVAE
+        from vae_lstm_ho import RadProPoserVAECov
         #from normalizing_flow import RadProPoserVAE
         #from vae_lstm_ho import CNN_LSTM
         #from vae_lstm_ho import HRRadarPose
         #from evidential_pose_regression import RadProPoserEvidential
         #self.model = RadProPoserVAE().to(self.device)
-        self.model = RadProPoserVAE().to(self.device)
+        self.model = RadProPoserVAECov().to(self.device)
         #self.model = CNN_LSTM().to(self.device)
         #self.model = RadProPoserEvidential().to(self.device)
         self.model = trainLoop.loadCheckpoint(self.model, None, model_path)
@@ -289,10 +289,10 @@ class RadarPoseTester:
                 all_cdfs.append(cdfs.cpu().numpy())
 
         os.makedirs("calibration_analysis", exist_ok=True)
-        np.save("calibration_analysis/mu_testing_laplace_gauss.npy", np.concatenate(all_preds, axis=0))
-        np.save("calibration_analysis/gt_testing_laplace_gauss.npy", np.concatenate(all_gts, axis=0))
-        np.save("calibration_analysis/var_testing_laplace_gauss.npy", np.concatenate(all_vars, axis=0))
-        np.save("calibration_analysis/cdf_testing_laplace_gauss.npy", np.concatenate(all_cdfs, axis=0))
+        np.save("calibration_analysis/mu_testing_gauss_gauss_cov.npy", np.concatenate(all_preds, axis=0))
+        np.save("calibration_analysis/gt_testing_gauss_gauss_cov.npy", np.concatenate(all_gts, axis=0))
+        np.save("calibration_analysis/var_testing_gauss_gauss_cov.npy", np.concatenate(all_vars, axis=0))
+        np.save("calibration_analysis/cdf_testing_gauss_gauss_cov.npy", np.concatenate(all_cdfs, axis=0))
 
         return results_by_participant
 
@@ -300,12 +300,12 @@ if __name__ == "__main__":
     tester = RadarPoseTester(root_path=PATHRAW)
 
     res = tester.run_evaluation(
-        parts= ["p2", "p12"],#["p1"], #, "p2", "p12"],
+        parts= ["p2", "p1"],# "p12"],#["p2", "p1"], #["p2", "p1"], #["p12"], #, ["p2", "p1"],
         angles=["an0", "an1", "an2"],
         actions=["ac1", "ac2", "ac3", "ac4", "ac5", "ac6", "ac7", "ac8", "ac9"],
         reps=["r0", "r1"],
         model_path=os.path.join(HPECKPT, 
-                                "/home/jonas/code/RadProPoser/trainedModels/humanPoseEstimation/RPP_laplace_gauss3")
+                                "/home/jonas/code/RadProPoser/trainedModels/humanPoseEstimation/RPP_GAUSS_GAUSS_COV/correct")
     )
 
     print(res)

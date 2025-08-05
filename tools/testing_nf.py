@@ -304,7 +304,7 @@ if __name__ == "__main__":
     tester = RadarPoseTester(root_path=PATHRAW)
 
     res = tester.run_evaluation(
-        parts= ["p1"], # ["p2", "p12"],#["p1"], #, "p2", "p12"],
+        parts= ["p2", "p1"], # ["p2", "p12"],#["p1"], #, "p2", "p12"],
         angles=["an0", "an1", "an2"],
         actions=["ac1", "ac2", "ac3", "ac4", "ac5", "ac6", "ac7", "ac8", "ac9"],
         reps=["r0", "r1"],

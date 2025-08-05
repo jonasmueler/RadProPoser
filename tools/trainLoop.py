@@ -148,6 +148,32 @@ def nllLoss(gt: torch.Tensor,
 
     return loss, pen
 
+def nll_from_cov(gt: torch.Tensor,
+                 mu: torch.Tensor,
+                 cov: torch.Tensor):
+    """
+    gt  : (B, K)         ground truth
+    mu  : (B, K)         predictive mean
+    cov : (B, K, K)      predictive covariance (SPD)
+    """
+    B, K = gt.shape
+    eps  = 1e-6
+    eye  = torch.eye(K, device=cov.device, dtype=cov.dtype)
+    cov  = cov + eps * eye                       # SPD “jitter”
+
+    L    = torch.linalg.cholesky(cov)            # (B, K, K)
+    diff = (gt - mu).unsqueeze(-1)               # (B, K, 1)
+    y    = torch.linalg.solve_triangular(L, diff, upper=False)
+    maha = (y.square()).sum(dim=(-2, -1))        # Mahalanobis  (B,)
+
+    logdet = 2.0 * torch.log(torch.diagonal(L, 0, -2, -1)).sum(-1)
+
+    nll = 0.5 * (maha + logdet + K * np.log(2.0 * np.pi))  # (B,)
+
+    pen = TRAINCONFIG["gamma"] * cov.diagonal(dim1=-2, dim2=-1).mean(dim=-1)  # (B,)
+
+    return nll.mean() + pen.mean(), pen.mean()
+
 def nllLoss_elementwise(gt: torch.Tensor, 
             mu: torch.Tensor, 
             var: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -341,11 +367,13 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
             if TRAINCONFIG["nll"] == True:
                 # generator loss
                 preds, mu, logVar, muOut, varOut = model.forward(radar)
-                #KLloss = KLLoss(mu, logVar) 
+                KLloss = KLLoss(mu, logVar) 
                 #KLloss = kl_laplace_exact_full(mu, logVar) 
-                nLL, pen = nllLoss(gt, muOut, varOut)
+                #nLL, pen = nllLoss(gt, muOut, varOut)
                 #nLL, pen = laplace_nll(gt, muOut, varOut)
-                loss = nLL #+ TRAINCONFIG["beta"] * KLloss
+                nLL, pen = nll_from_cov(gt, muOut, varOut)
+
+                loss = nLL + TRAINCONFIG["beta"] * KLloss
 
             elif TRAINCONFIG["nf"] == True:
                     mu, kld = model.forward(radar, inference = False)
@@ -386,7 +414,7 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
             if TRAINCONFIG["nll"] == True:
                 if WandB:
                         wandb.log({"nll": nLL.detach().cpu().item(), 
-                                   #"KLLOss": KLloss.detach().cpu().item(), 
+                                   "KLLOss": KLloss.detach().cpu().item(), 
                                    "loss": loss.detach().cpu().item(), 
                                    "varPenalty": pen.detach().cpu().item()})
                         

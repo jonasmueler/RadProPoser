@@ -295,8 +295,8 @@ class MultiModelRecalibrationVisualizer:
         cdf_uncal = self._get_cdf_at_y(cdf_test, gt_test)
         unc_error = self._compute_calibration_error(cdf_uncal)
         #unc_sharpness_vec = np.mean(np.sqrt(var_test))  # per-dim average σ²
-        unc_sharpness_vec = np.mean(np.sqrt(np.sum(var_test.reshape(var_test.shape[0], 26, 3), axis = -1)))  # per-dim average σ
-        unc_sharpness_vec_keys = np.sqrt(np.sum(np.mean(var_test.reshape(var_test.shape[0], 26, 3), axis = 0), axis = -1))
+        unc_sharpness_vec = np.mean(np.sum(var_test.reshape(var_test.shape[0], 26, 3), axis = -1))  # per-dim average σ
+        unc_sharpness_vec_keys = np.sum(np.mean(var_test.reshape(var_test.shape[0], 26, 3), axis = 0), axis = -1)
         print(f"Calibration Error (Uncalibrated per key) ", unc_sharpness_vec_keys)
         print(f"Calibration Error (Uncalibrated): {unc_error:.6f}")
         print(f"Sharpness (Uncalibrated): {unc_sharpness_vec}")
@@ -326,10 +326,10 @@ class MultiModelRecalibrationVisualizer:
                 sharpness_vec = np.stack(sharpness_vals, axis=0)
                 print(f"Sharpness Vector (Recalibrated - {model_type}):")
                 #print(np.sqrt(sharpness_vec))
-                print(np.sqrt(np.sum(sharpness_vec.reshape( 26,3), axis = -1)))
+                print(np.sum(sharpness_vec.reshape( 26,3), axis = -1))
                 
                 #print("mean ", np.mean(np.sqrt(sharpness_vec)))
-                print(np.mean(np.sqrt(np.sum(sharpness_vec.reshape(26,3), axis = -1))))
+                print(np.mean(np.sum(sharpness_vec.reshape(26,3), axis = -1)))
 
             else:
                 print(f"(Skipping sharpness: {model_type} is not a monotonic CDF model)")
