@@ -436,9 +436,9 @@ class SimpleFlowModel(nn.Module):
             ld += ld_
         return z, ld
 
-class RadProPoserVAE(nn.Module):
+class RadProPoserVAENF(nn.Module):
     def __init__(self):
-        super(RadProPoserVAE, self).__init__()
+        super(RadProPoserVAENF, self).__init__()
 
         # backbone 
         self.backbone = HighResolution3DNet(
@@ -522,7 +522,8 @@ class RadProPoserVAE(nn.Module):
         #spatiotemp = torch.cat(spatFeat, dim=1)
         mu = self.mu(spatiotemp)
         sigma = self.sigma(spatiotemp)
-        return mu, sigma
+        return mu, sigma 
+
 
     def forward(self, 
                 x: torch.Tensor, 
@@ -553,33 +554,13 @@ class RadProPoserVAE(nn.Module):
             muOut = self.decoder(zK)
 
             return muOut, kld
-            
-        """
+
+
         if inference == True:
             mu, logvar = self.getLatent(x)
             std = torch.exp(0.5 * logvar)
-            preds = []
-            for i in range(100):
-                norm_scale = torch.randn_like(std) #* self.varianceScaling
-                z0 = mu + norm_scale * std
 
-                # Flow transformation
-                zK, log_det = self.flows(z0)
-                zK = zK.squeeze()
-
-                sample = self.decoder(zK)
-                preds.append(sample)
-            
-            mu_out = torch.mean(torch.stack(preds, dim = 1), dim = 1)
-
-            return mu_out
-
-        """
-        if inference is True:
-            mu, logvar = self.getLatent(x)
-            std = torch.exp(0.5 * logvar)
-
-            n_samples = 100  # number of MC samples
+            n_samples = 500  # number of MC samples
 
             # [B, 1, D] + [B, n_samples, D]
             mu = mu.unsqueeze(1)                     # [B, 1, D]
@@ -595,8 +576,13 @@ class RadProPoserVAE(nn.Module):
 
             decoded = decoded.view(mu.size(0), n_samples, -1)  # [B, n_samples, 78]
             mu_out = decoded.mean(dim=1)             # [B, 78]
+            var_out = decoded.var(dim=1)  
 
-            return mu_out
+            # Compute the CDF based on predicted samples
+            decoded = decoded.permute(0, 2, 1) 
+            
+
+            return mu_out, var_out, decoded
                 
 
         
@@ -609,8 +595,8 @@ if __name__ == "__main__":
     testData = torch.rand(10, 8, 4, 4, 64, 128).cuda()
 
     
-    mu = model.forward(testData, inference = True)
-    print(mu.size())
+    _, _, cdf = model.forward(testData, inference = True)
+    print(cdf.size())
         
 
     

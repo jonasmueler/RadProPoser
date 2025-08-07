@@ -8,6 +8,7 @@ import torch
 from edl_pytorch import NormalInvGamma
 from torch.distributions import Laplace
 from transformer import Transformer
+from torch.func import vmap
 
 class HighResolutionModule(nn.Module):
     def __init__(
@@ -449,10 +450,8 @@ class RadProPoserVAE(nn.Module):
         self.latent_dist = "gaussian"
 
         # decoder 
-        self.decoder = nn.Sequential(#ResidualMLP(256),
-                                     #nn.GELU(),
+        self.decoder = nn.Sequential(
                                      nn.Linear(256, 128),
-                                     #ResidualMLP(128), 
                                      nn.Linear(128, 78))
     
     def sample(self, mu: torch.Tensor, logvar: torch.Tensor, device: str = "cuda") -> torch.Tensor:
@@ -532,6 +531,8 @@ class RadProPoserVAE(nn.Module):
         sigma = self.sigma(spatiotemp)
         
         return mu, sigma
+    
+    
 
     def forward(self, 
                 x: torch.Tensor):
@@ -568,8 +569,197 @@ class RadProPoserVAE(nn.Module):
         muOut = torch.mean(samples, dim = 1)
         varOut = torch.var(samples, dim = 1)
 
+        samples = samples.permute(0, 2, 1)
+
         #return self.decoder(self.sample(mu, sigma)), mu, sigma, muOut, varOut
-        return None, mu, sigma, muOut, varOut
+        return None, mu, sigma, muOut, varOut, 
+
+class RadProPoserVAECov(nn.Module):
+    def __init__(self):
+        super(RadProPoserVAECov, self).__init__()
+
+        # backbone 
+        self.backbone = HighResolution3DNet(
+            MODEL_CONFIGS["hr_tiny_feat64_zyx_l4_in64"], full_res_stem=True)
+        
+        self.bottleNeck = nn.Sequential(
+                nn.Conv3d(in_channels=384, out_channels=32, kernel_size=(1, 1, 8), stride=(1, 1, 8)),  # 3x3x3 conv
+                nn.BatchNorm3d(32),  # Batch normalization
+                nn.ReLU(inplace=True),  # ReLU activation
+
+                nn.Conv3d(in_channels=32, out_channels=8, kernel_size=(1, 1, 8), stride=(1, 1, 8)),  # 3x3x3 conv
+                nn.BatchNorm3d(8),  # Batch normalization
+                nn.ReLU(inplace=True),  # ReLU activation
+
+                nn.Flatten(start_dim = 1, end_dim = -1)
+            )
+
+        # transformer 
+        self.former = Transformer()
+        
+        # latent space 
+        self.mu = nn.Sequential(nn.Linear(2048, 256))
+        self.sigma = nn.Sequential(nn.Linear(2048, 256))
+        self.varianceScaling = nn.Parameter(torch.tensor(0.1))
+        self.Nsamples = 500
+        self.latent_dist = "gaussian"
+
+        # decoder 
+        self.decoder = nn.Sequential(#ResidualMLP(256),
+                                     #nn.GELU(),
+                                     nn.Linear(256, 128),
+                                     #ResidualMLP(128), 
+                                     nn.Linear(128, 78))
+    
+    def sample(self, mu: torch.Tensor, logvar: torch.Tensor, device: str = "cuda") -> torch.Tensor:
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std).to(device) * self.varianceScaling 
+        return mu + eps * std
+    
+    def sample_laplace(self, 
+                       mu: torch.Tensor, 
+                       b_raw: torch.Tensor) -> torch.Tensor:
+        """
+        Sample from Laplace(mu, b), where b is passed as raw (unconstrained) values.
+        Softplus is applied to ensure positive scale.
+
+        Args:
+            mu: Mean tensor, shape (..., latent_dim)
+            b_raw: Raw (unconstrained) scale tensor, shape (..., latent_dim)
+
+        Returns:
+            z: Differentiable sample from Laplace(mu, b), same shape as mu
+        """
+        b = torch.nn.functional.softplus(b_raw) + 1e-6  # ensure b > 0
+        dist = Laplace(loc=mu, scale=b)
+        return dist.rsample()
+
+    
+    def preProcess(self, 
+                   x: torch.Tensor):
+        x = x - torch.mean(x, dim = -1, keepdim = True)
+        x = torch.fft.fft(torch.fft.fft(torch.fft.fft(torch.fft.fft(x ,dim = -1,  norm = "forward"), dim = -2,  norm = "forward"), dim = -3,  norm = "forward"), dim = -4,  norm = "forward")
+        x = x.permute(0, 1, 5, 2, 3, 4) 
+        return x
+
+    def applyBackbone(self, x: torch.Tensor):
+        # get features
+        featureList = self.backbone(x)
+
+        # interpolate to same size
+        features = []
+        for feature in featureList:
+            
+            helper = F.interpolate(feature.float(), size=(4, 4, 64), mode='trilinear')
+            features.append(helper)
+        
+        features = torch.cat(features, dim = 1)
+        features = self.bottleNeck(features)
+
+        return features
+    
+    def sampleLatent(self, 
+                     mu: torch.Tensor, 
+                     sigma: torch.Tensor, 
+                     alpha: float = None)->torch.Tensor:
+        if alpha != None:
+            self.varianceScaling = torch.tensor(alpha)
+        out = self.sample(mu, sigma)
+        return out
+    
+    def ensemble_stats(self, preds: torch.Tensor):
+        """
+        preds  : (B, K, E)  –  batch × features/keypoints × ensemble samples
+        returns:
+            mu  : (B, K)
+            cov : (B, K, K)
+        """
+        mu  = preds.mean(dim=2)                               # (B, K)
+        # torch.cov expects (variables, samples) → we feed (K, E) for each batch item
+        cov = vmap(lambda x: torch.cov(x, correction=1))(preds)  # (B, K, K)
+        return mu, cov
+    
+    def ensemble_stats_var(self, preds: torch.Tensor):
+        """
+        Compute mean and variance over ensemble predictions.
+
+        Args:
+            preds: torch.Tensor of shape (B, K, E)
+                B = batch size, K = features/keypoints, E = ensemble samples
+
+        Returns:
+            mu  : torch.Tensor of shape (B, K)
+                Mean over ensemble samples
+            var : torch.Tensor of shape (B, K)
+                Variance over ensemble samples
+        """
+        mu = preds.mean(dim=2)        # (B, K)
+        var = preds.var(dim=2, unbiased=True)  # (B, K), using Bessel correction (unbiased)
+        return mu, var
+
+    def getLatent(self, x: torch.Tensor)-> tuple[torch.Tensor, torch.Tensor]:
+        # fft layer 
+        #x = self.preProcess(x) # watch out with batch = 1
+        device = x.device
+
+        # part in real and imag
+        xComp = [x.real, x.imag]
+        spatFeat = []
+        for elmt in xComp:
+            for i in range(elmt.size(1)):
+                helper = self.applyBackbone(elmt[:,i].float())
+                spatFeat.append(helper)
+        
+        # fuse together to get mu and sgm
+        spatiotemp = torch.cat(spatFeat, dim = 1)
+
+        # get latent 
+        mu = self.mu(spatiotemp)
+        sigma = self.sigma(spatiotemp)
+        
+        return mu, sigma
+    
+    
+
+    def forward(self, 
+                x: torch.Tensor):
+        # fft layer 
+        x = self.preProcess(x) # watch out with batch = 1
+        device = x.device
+
+        # part in real and imag
+        xComp = [x.real, x.imag]
+        spatFeat = []
+        for elmt in xComp:
+            for i in range(elmt.size(1)):
+                helper = self.applyBackbone(elmt[:,i].float())
+                spatFeat.append(helper)
+        
+        # process with ransformer layer
+        spatiotemp = torch.stack(spatFeat, dim = 1)
+        spatiotemp = self.former(spatiotemp).flatten(start_dim = 1, end_dim = -1)
+
+        # fuse together to get mu and sgm
+        #spatiotemp = torch.cat(spatFeat, dim = 1)
+
+        # get latent 
+        mu = self.mu(spatiotemp)
+        sigma = self.sigma(spatiotemp)
+
+        if self.latent_dist == "laplace":
+            samples = self.decoder(torch.stack([self.sample_laplace(mu, sigma) for i in range(self.Nsamples)], dim = 1))
+
+        
+        else: # gaussian
+            samples = self.decoder(torch.stack([self.sample(mu, sigma, device = device) for i in range(self.Nsamples)], dim = 1))
+
+        samples = samples.permute(0, 2, 1)
+
+        muOut, cov = self.ensemble_stats_var(samples)
+
+        #return self.decoder(self.sample(mu, sigma)), mu, sigma, muOut, varOut
+        return None, mu, sigma, muOut, cov, samples
+
 
 
 class ResidualMLP(nn.Module):
@@ -703,94 +893,6 @@ class RadProPoserPad(nn.Module):
         out = self.out(spatiotemp)
 
         return out 
-
-
-
-class RadProPoserEvidential(nn.Module):
-    def __init__(self):
-        super(RadProPoserEvidential, self).__init__()
-
-        # backbone 
-        self.backbone = HighResolution3DNet(
-            MODEL_CONFIGS["hr_tiny_feat64_zyx_l4_in64"], full_res_stem=True)
-        
-        self.bottleNeck = nn.Sequential(
-                nn.Conv3d(in_channels=384, out_channels=32, kernel_size=(1, 1, 8), stride=(1, 1, 8)),  # 3x3x3 conv
-                nn.BatchNorm3d(32),  # Batch normalization
-                nn.ReLU(inplace=True),  # ReLU activation
-
-                nn.Conv3d(in_channels=32, out_channels=8, kernel_size=(1, 1, 8), stride=(1, 1, 8)),  # 3x3x3 conv
-                nn.BatchNorm3d(8),  # Batch normalization
-                nn.ReLU(inplace=True),  # ReLU activation
-
-                nn.Flatten(start_dim = 1, end_dim = -1)
-            )
-
-        
-        # latent space 
-        #self.out = nn.Sequential(nn.LayerNorm(2048), 
-        #                         ResidualMLP(2048),
-        #                         nn.Dropout(0.1),
-        #                         nn.Linear(2048, 256),
-        #                         ResidualMLP(256),
-        #                         nn.Linear(256, 128), 
-        #                         NormalInvGamma(128, 78))#
-        self.out_uncertainty = nn.Sequential( 
-                                 nn.Linear(2048, 256),
-                                 nn.Linear(256, 128), 
-                                 NormalInvGamma(128, 78))
-        
-        self.out = nn.Sequential( 
-                                 nn.Linear(2048, 256),
-                                 nn.Linear(256, 128), 
-                                 nn.Linear(128, 78))
-    
-    def preProcess(self, 
-                   x: torch.Tensor):
-        x = x - torch.mean(x, dim = -1, keepdim = True)
-        x = torch.fft.fft(torch.fft.fft(torch.fft.fft(torch.fft.fft(x ,dim = -1,  norm = "forward"), dim = -2,  norm = "forward"), dim = -3,  norm = "forward"), dim = -4,  norm = "forward")
-
-        x = x.permute(0, 1, 5, 2, 3, 4) 
-        return x
-
-    def applyBackbone(self, x: torch.Tensor):
-        # get features
-        featureList = self.backbone(x)
-
-        # interpolate to same size
-        features = []
-        for feature in featureList:
-            
-            helper = F.interpolate(feature.float(), size=(4, 4, 64), mode='trilinear')
-            features.append(helper)
-        
-        features = torch.cat(features, dim = 1)
-        features = self.bottleNeck(features)
-
-        return features
-    
-    def forward(self, 
-                x: torch.Tensor):
-        # fft layer 
-        #x = self.preProcess(x) # watch out with batch = 1
-        #device = x.device
-
-        # part in real and imag
-        xComp = [x.real, x.imag]
-        spatFeat = []
-        for elmt in xComp:
-            for i in range(elmt.size(1)):
-                helper = self.applyBackbone(elmt[:,i].float())
-                spatFeat.append(helper)
-        
-        # fuse together to get mu and sgm
-        spatiotemp = torch.cat(spatFeat, dim = 1)
-
-        out_uncertainty = self.out_uncertainty(spatiotemp)
-        out = self.out(spatiotemp)
-
-        return out_uncertainty, out 
-
 
 class LSTMModel(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers, output_size):

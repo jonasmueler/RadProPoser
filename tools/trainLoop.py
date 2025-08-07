@@ -92,39 +92,6 @@ def KLLoss(mu: torch.Tensor,
     klloss = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp()).mean()
     return klloss
 
-def kl_laplace_exact_full(mu_q: torch.Tensor,
-                          b_q: torch.Tensor,
-                          mu_p: float = 0.0,
-                          b_p: float = 1.0) -> torch.Tensor:
-    """
-    Compute the exact KL divergence D_KL(q || p) where:
-    - q ~ Laplace(mu_q, b_q)
-    - p ~ Laplace(mu_p, b_p) is a standard Laplace prior (default: mu=0, b=1)
-
-    Args:
-        mu_q: Posterior mean, shape (batch_size, latent_dim)
-        b_q: Posterior scale (> 0), shape (batch_size, latent_dim)
-        mu_p: Prior mean (scalar, default = 0)
-        b_p: Prior scale (scalar, default = 1)
-
-    Returns:
-        kl: Tensor of shape (batch_size,), summed KL per sample
-    """
-    # Ensure numerical stability
-    b_q = torch.clamp(b_q, min=1e-6)
-
-    delta = torch.abs(mu_q - mu_p)
-
-    kl = (
-        b_q * torch.exp(-delta / b_q) +       # term 1
-        delta / b_p +                         # term 2
-        torch.log(torch.tensor(b_p) / b_q) +  # term 3
-        b_q / b_p -                           # term 4
-        1                                     # constant term
-    )
-
-    return kl.mean()  # sum over latent dims for each sample
-
 def nllLoss(gt: torch.Tensor, 
             mu: torch.Tensor, 
             var: torch.Tensor) -> torch.Tensor:
@@ -174,25 +141,7 @@ def nll_from_cov(gt: torch.Tensor,
 
     return nll.mean() + pen.mean(), pen.mean()
 
-def nllLoss_elementwise(gt: torch.Tensor, 
-            mu: torch.Tensor, 
-            var: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Simplified NLL loss with late reduction for better control.
 
-    Args:
-        gt (torch.Tensor): Ground truth.
-        mu (torch.Tensor): Predicted mean.
-        var (torch.Tensor): Predicted variance.
-
-    Returns:
-        Tuple of (total loss, penalty term).
-    """
-    var = torch.clamp(var, min=1e-6)
-    nll = (gt - mu)**2 / var
-    pen = TRAINCONFIG["gamma"] * var
-    total = nll + pen
-    return total.mean(), pen.mean()
 
 def nllLoss_precision(gt: torch.Tensor, 
                         mu: torch.Tensor, 
@@ -256,19 +205,6 @@ def laplace_nll(
     return loss.mean(), pen.mean()
     
 
-def evidential_uncertainty(v: torch.Tensor, 
-                           alpha: torch.Tensor, 
-                           beta: torch.Tensor) -> torch.Tensor:
-    # Clamp for numerical stability
-    #v = torch.clamp(v, min=1.0)
-    #alpha = torch.clamp(alpha, min=1.1)
-    #beta = torch.clamp(beta, max=1e6)
-
-    aleatoric = beta / (alpha - 1)
-    epistemic = beta / (v * (alpha - 1))
-
-    #return aleatoric + epistemic
-    return epistemic 
 
 def trainLoop(trainLoader: torch.utils.data.DataLoader, 
               valLoader: torch.utils.data.DataLoader, 
@@ -365,10 +301,8 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
 
             # loss functions
             if TRAINCONFIG["nll"] == True:
-                # generator loss
                 preds, mu, logVar, muOut, varOut = model.forward(radar)
                 KLloss = KLLoss(mu, logVar) 
-                #KLloss = kl_laplace_exact_full(mu, logVar) 
                 #nLL, pen = nllLoss(gt, muOut, varOut)
                 #nLL, pen = laplace_nll(gt, muOut, varOut)
                 nLL, pen = nll_from_cov(gt, muOut, varOut)
@@ -444,7 +378,6 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
         with torch.no_grad():
             print("start validating model")
             valLossMean = 0
-            predictions, variances, gts = [], [], []
             counter = 0
             for x,  y in valLoader:
                 model.eval()
@@ -455,28 +388,18 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                     _, _, _, preds, logvar = model.forward(x)
 
                     var = torch.exp(logvar)
-
-                    predictions.append(preds.detach().cpu())
-                    variances.append(var.detach().cpu())
-                    gts.append(y.detach().cpu())
-
                 
                 elif TRAINCONFIG["nf"] == True:
                     preds = model.forward(x, inference = True)
 
-                    #predictions.append(preds.detach().cpu())
-                    #variances.append(var.detach().cpu())
-                    #gts.append(y.detach().cpu())
-                
+
                 elif TRAINCONFIG["evd"] == True:
                     # generator loss
                     preds = model(x) # (mu, v, alpha, beta)
                     preds = preds[0]
-                    var = evidential_uncertainty(pred_nig[1], pred_nig[2], pred_nig[3]) # epistemic uncertainty
+                    
 
-                    #predictions.append(preds.detach().cpu())
-                    #variances.append(var.detach().cpu())
-                    #gts.append(y.detach().cpu())
+
                 
                 elif TRAINCONFIG["HR_SINGLE"] == True:
                      root, offset = model(x)
@@ -496,16 +419,10 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                         
             valLosses = valLossMean/counter + 1 
 
-            # calibration scores 
-            #mu = torch.cat(predictions, dim = 0)
-            #var  = torch.cat(variances, dim = 0)
-            #gt = mu = torch.cat(gts, dim = 0)
-            #calLoss, sharpness, _ = compute_calibration_and_sharpness(mu, var, gt, 500)
+            
 
             if WandB:
                     wandb.log({"valLoss": valLosses.detach().cpu().item(), 
-                               #"calibration": calLoss, 
-                               #"sharpness": sharpness}
                                })
             print("valLoss: ", valLosses.detach().cpu().item())
 

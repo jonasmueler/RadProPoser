@@ -2,7 +2,7 @@ import os
 
 ## globals
 SEQLEN = 8
-MODELNAME = "RPP_Gauss_Gauss_Cov"
+MODELNAME = None
 
 ############################################### HPE #######################################################################
 ## model paramas
@@ -64,22 +64,7 @@ TRAINCONFIG = {"learningRate": 0.0001,
 
 
 
-## CNN-LSTM 
-# define hyperparameters
-"""
-TRAINCONFIG = {"learningRate": 0.0001, 
-          "weightDecay": 0.0001,
-          "epochs": 40, 
-          "batchSize": 16, #16 #64 
-          "optimizer": "adam", 
-          "device": "cuda", 
-          "betas": (0.9, 0.999), # momentum and scaling for ADAM, 
-          "lrDecay": 0.99, 
-          "nll": False,
-          "evd": False,
-          "nf": False
-          }
-"""
+
 ## Ho et al
 # define hyperparameters
 
@@ -99,17 +84,9 @@ TRAINCONFIG = {"learningRate": 0.0001,
           }
 """
 
-############################################################## Activity Classification #########################################################
-CLASSIFIERCONFIG = {"batch_size": 32, 
-                    "learning_rate": 0.001, 
-                    "num_epochs": 50, 
-                    "device": "cpu"
-          }
 
 # paths
-PATHORIGIN = "/home/jonas/code/RadProPoser"
+PATHORIGIN = None
 MODELPATH = os.path.join(PATHORIGIN, "models")
-PATHLATENT = os.path.join(PATHORIGIN, "data", "latentData")
-PATHRAW = "/home/jonas/data/radarPose/mmRadPose_rawdata"
-ACTIVITYCLASSIFICATIONCKPT = os.path.join(PATHORIGIN, "trainedModels", "activityClassification")
+PATHRAW = None
 HPECKPT = os.path.join(PATHORIGIN, "trainedModels", "humanPoseEstimation")

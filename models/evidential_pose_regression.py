@@ -6,6 +6,7 @@ from hrnet3D_config_4D import MODEL_CONFIGS as cfg_4D
 from yacs.config import CfgNode as CN
 import torch
 from edl_pytorch import NormalInvGamma
+from transformer import Transformer
 
 class HighResolutionModule(nn.Module):
     def __init__(
@@ -436,26 +437,16 @@ class RadProPoserEvidential(nn.Module):
                 nn.Flatten(start_dim = 1, end_dim = -1)
             )
 
+        # transformer 
+        self.former = Transformer()
         
-        # latent space 
-        #self.out = nn.Sequential(nn.LayerNorm(2048), 
-        #                         ResidualMLP(2048),
-        #                         nn.Dropout(0.1),
-        #                         nn.Linear(2048, 256),
-        #                         ResidualMLP(256),
-        #                         nn.Linear(256, 128), 
-        #                         NormalInvGamma(128, 78))#
         self.out_uncertainty = nn.Sequential( 
                                  nn.Linear(2048, 256),
         #                         ResidualMLP(256),
                                  nn.Linear(256, 128), 
                                  NormalInvGamma(128, 78))
         
-        #self.out = nn.Sequential( 
-        #                         nn.Linear(2048, 256),
-        #                         ResidualMLP(256),
-        #                         nn.Linear(256, 128), 
-        #                         nn.Linear(128, 78))
+        
     
     def preProcess(self, 
                    x: torch.Tensor):
@@ -481,6 +472,40 @@ class RadProPoserEvidential(nn.Module):
 
         return features
     
+    def sample_aleatoric_from_output(self,
+        model_output,
+        n_samples: int = 500,
+        eps: float = 1e-6
+            ) -> torch.Tensor:
+        """
+        Draw aleatoric‐only samples, ensuring alpha>1 so that variance=beta/(alpha-1) >= 0.
+
+        Args:
+        model_output: tuple/list of (mu, v, alpha, beta), each [B,D]
+        n_samples:    number of MC draws
+        eps:          small positive to ensure alpha-1 >= eps
+
+        Returns:
+        samples: [B, n_samples, D]
+        """
+        mu, v, alpha, beta = model_output  # each [B, D]
+
+        # clamp alpha so that alpha - 1 >= eps
+        alpha_clamped = torch.clamp(alpha, min=1.0 + eps)
+
+        # aleatoric variance = beta / (alpha_clamped - 1)
+        alea_var = beta / (alpha_clamped - 1.0)
+
+        # safe standard deviation
+        alea_std = torch.sqrt(alea_var)
+
+        B, D = mu.shape
+        mu_exp  = mu   .unsqueeze(1).expand(B, n_samples, D)
+        std_exp = alea_std.unsqueeze(1).expand(B, n_samples, D)
+
+        eps_noise = torch.randn_like(std_exp)
+        return mu_exp + eps_noise * std_exp
+        
     def forward(self, 
                 x: torch.Tensor):
         # fft layer 
@@ -495,13 +520,18 @@ class RadProPoserEvidential(nn.Module):
                 helper = self.applyBackbone(elmt[:,i].float())
                 spatFeat.append(helper)
         
+        # process with ransformer layer
+        spatiotemp = torch.stack(spatFeat, dim = 1)
+        spatiotemp = self.former(spatiotemp).flatten(start_dim = 1, end_dim = -1)
+        
         # fuse together to get mu and sgm
-        spatiotemp = torch.cat(spatFeat, dim = 1)
+        #spatiotemp = torch.cat(spatFeat, dim = 1)
 
         out_uncertainty = self.out_uncertainty(spatiotemp)
         #out = self.out(spatiotemp)
+        samples = self.sample_aleatoric_from_output(out_uncertainty)
 
-        return out_uncertainty
+        return out_uncertainty, samples.permute(0, 2, 1)
 
 
 

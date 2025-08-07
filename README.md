@@ -64,23 +64,6 @@ Run evaluation on the test set:
 python tools/testing.py
 ```
 
-## Activity Classification 
-### 1. Create latent space data
-Change the paths in the /config.py file in /tools. The train data is automaticlly geneted based on specified parameters and directories in the file.
-Create data:
-```bash
-python tools/createLatentDataset.py
-```
 
-### 2. Train model
-Train classifier:
-```bash
-python tools/trainActivityClassifier.py
-```
 
-### 3. Evaluate model
-Train classifier:
-```bash
-python tools/classificationEval.py
-```
 

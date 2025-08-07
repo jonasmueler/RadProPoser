@@ -1,46 +1,152 @@
-# Byte-compiled / cache
+# Python
 __pycache__/
 *.py[cod]
+*$py.class
 *.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# Jupyter Notebook checkpoints
-.ipynb_checkpoints/
+# PyTorch specific
+*.pth
+*.pt
+*.pkl
+*.pickle
+*.ckpt
+checkpoint/
+checkpoints/
+saved_models/
+model_weights/
+pretrained/
+*.tar
 
-# Environment
-.env
-.venv/
+# TensorBoard logs
+runs/
+logs/
+tensorboard/
+tb_logs/
+lightning_logs/
+
+# Datasets (add specific dataset folders as needed)
+data/
+datasets/
+raw_data/
+processed_data/
+*.csv
+*.h5
+*.hdf5
+*.npy
+*.npz
+
+# Images and media files (uncomment if you want to exclude)
+# *.jpg
+# *.jpeg
+# *.png
+# *.gif
+# *.bmp
+# *.tiff
+# *.mp4
+# *.avi
+# *.mov
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Virtual environments
 env/
 venv/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+conda_env/
 
-# PyTorch / model checkpoints
-*.pt
-*.pth
-*.ckpt
-*.onnx
-
-# Logs and experiment outputs
-wandb/
-trainedModels/
-*.log
-*.out
-
-# Config / temp / local runs
-*.yaml
-*.yml
-*.toml
-*.json
-*.tmp
-
-# VSCode / IDE
+# IDE and editors
 .vscode/
 .idea/
 *.swp
+*.swo
+*~
+.spyderproject
+.spyproject
 
-# OS files
+# OS specific
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+*.tmp
 
-# Ignore your compiled C/C++ if any
-*.o
-*.a
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Configuration files (if they contain sensitive info)
+config.yaml
+config.json
+secrets.yaml
+
+# Weights and Biases
+wandb/
+
+# MLflow
+mlruns/
+mlartifacts/
+
+# DVC (Data Version Control)
+.dvc
+
+# Cache directories
+.cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temporary files
+*.log
 *.out
+*.err
+temp/
+tmp/
+
+# CUDA cache
+.nv/
+
+# Conda
+*.condarc
+
+# Generated files
+results/
+outputs/
+figures/
+plots/
+
+# Large files (adjust extensions as needed)
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Specific to your project (uncomment/modify as needed)
+# experiments/
+# submissions/
+# paper_results/
