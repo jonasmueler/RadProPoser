@@ -8,7 +8,6 @@ MODELNAME = None # set the name of the model you want to train  here
 ## model paramas
 
 if MODELNAME in ("RPPgaussianGaussian", "RPPgaussianGaussianCov"):
-  # 20, 5 gaussian, 1,1 laplace, laplace gaussian 1, 5
   TRAINCONFIG = {"learningRate": 0.001, 
             "weightDecay": 0.0001,
             "epochs": 24, 
