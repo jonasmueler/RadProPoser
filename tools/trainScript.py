@@ -23,12 +23,7 @@ elif MODELNAME in ("RPPnormalizingFlow"):
 elif MODELNAME in ("HoEtAlBaseline"):
     from models import HRRadarPose as Encoder
 else:
-    warnings.warn(
-        "Invalid model configuration detected. "
-        "Check the model name and likelihood combination. "
-        "This may lead to incorrect training behavior.",
-        category=UserWarning
-    )
+    raise ValueError(f"Invalid MODELNAME: {MODELNAME}. Check config.py for valid model names.")
 
 CF = Encoder().to(TRAINCONFIG["device"])
 
@@ -111,7 +106,7 @@ MSE = torch.nn.MSELoss()
 
 
 if __name__ == "__main__":
-    #setSeed(42)
+    setSeed(42)
     trainLoop.trainLoop(dataTrain,
               dataVal, 
               CF,

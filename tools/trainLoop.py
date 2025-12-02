@@ -275,8 +275,8 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
     # load model and optimizer from checkpoint
     if loadModel:
         # get into folder
-        os.chdir(PATHORIGIN + "/models")
-        lastState = loadCheckpoint(model, optimizer, PATHORIGIN + "/trainedModels/" + modelName)
+        os.chdir(os.path.join(PATHORIGIN, "models"))
+        lastState = loadCheckpoint(model, optimizer, os.path.join(PATHORIGIN, "trainedModels", modelName))
         model = lastState[0]
         optimizer = lastState[1]
 
@@ -435,7 +435,7 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
             saveCheckpoint(model, optimizer, os.path.join(path, modelName + str(b)))
 
     ## save model state
-    saveCheckpoint(model, optimizer, PATHORIGIN + "/" + "trainedModels/" + modelName + str(b))
+    saveCheckpoint(model, optimizer, os.path.join(PATHORIGIN, "trainedModels", modelName + str(b)))
     print("Model saved!")
     print("Training done!")
 

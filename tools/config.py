@@ -122,9 +122,16 @@ if MODELNAME in ("HoEtAlBaseline"):
 
 
 # paths
-PATHORIGIN = None
+PATHORIGIN = None  # Set this to your data root path
+PATHRAW = None  # Set this to your raw radar data path
+
+# Validate paths before using them
+if PATHORIGIN is None:
+    raise ValueError("PATHORIGIN must be set in config.py")
+if PATHRAW is None:
+    raise ValueError("PATHRAW must be set in config.py")
+
 MODELPATH = os.path.join(PATHORIGIN, "models")
-PATHRAW = None
 HPECKPT = os.path.join(PATHORIGIN, "trainedModels", "humanPoseEstimation")
 
 
