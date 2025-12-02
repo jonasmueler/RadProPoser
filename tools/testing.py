@@ -299,22 +299,24 @@ class RadarPoseTester:
                     if ensembles_np is not None:
                         test_ensembles.append(ensembles_np)
 
-        os.makedirs("calibration_analysis", exist_ok=True)
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        calib_dir = os.path.join(base_dir, "calibration_analysis")
+        os.makedirs(calib_dir, exist_ok=True)
         model_suffix = MODELNAME.lower() if MODELNAME else "default"
 
         if val_preds:
-            np.save(f"calibration_analysis/mu_validation_{model_suffix}.npy", np.concatenate(val_preds, axis=0))
-            np.save(f"calibration_analysis/gt_validation_{model_suffix}.npy", np.concatenate(val_gts, axis=0))
-            np.save(f"calibration_analysis/var_validation_{model_suffix}.npy", np.concatenate(val_vars, axis=0))
+            np.save(os.path.join(calib_dir, f"mu_validation_{model_suffix}.npy"), np.concatenate(val_preds, axis=0))
+            np.save(os.path.join(calib_dir, f"gt_validation_{model_suffix}.npy"), np.concatenate(val_gts, axis=0))
+            np.save(os.path.join(calib_dir, f"var_validation_{model_suffix}.npy"), np.concatenate(val_vars, axis=0))
             if val_ensembles:
-                np.save(f"calibration_analysis/ensemble_validation_{model_suffix}.npy", np.concatenate(val_ensembles, axis=0))
+                np.save(os.path.join(calib_dir, f"ensemble_validation_{model_suffix}.npy"), np.concatenate(val_ensembles, axis=0))
 
         if test_preds:
-            np.save(f"calibration_analysis/mu_testing_{model_suffix}.npy", np.concatenate(test_preds, axis=0))
-            np.save(f"calibration_analysis/gt_testing_{model_suffix}.npy", np.concatenate(test_gts, axis=0))
-            np.save(f"calibration_analysis/var_testing_{model_suffix}.npy", np.concatenate(test_vars, axis=0))
+            np.save(os.path.join(calib_dir, f"mu_testing_{model_suffix}.npy"), np.concatenate(test_preds, axis=0))
+            np.save(os.path.join(calib_dir, f"gt_testing_{model_suffix}.npy"), np.concatenate(test_gts, axis=0))
+            np.save(os.path.join(calib_dir, f"var_testing_{model_suffix}.npy"), np.concatenate(test_vars, axis=0))
             if test_ensembles:
-                np.save(f"calibration_analysis/ensemble_testing_{model_suffix}.npy", np.concatenate(test_ensembles, axis=0))
+                np.save(os.path.join(calib_dir, f"ensemble_testing_{model_suffix}.npy"), np.concatenate(test_ensembles, axis=0))
 
         return results_by_participant
 

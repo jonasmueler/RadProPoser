@@ -14,10 +14,12 @@ RadProPoser/
 │   ├── raw_radar_data/     
 │   │   ├── radar 
 │   │   ├── skeletons
-│   │   ├── README.md
-│   ├── data_latent   
+│   │   ├── README.md  
 ├── models                   
 ├── tools 
+│   ├── calibration_analysis/     # Test results (auto-created)
+│   ├── calibration_plots/        # Calibration plots (auto-created)
+│   └── calibrated_models/        # Recalibration models (auto-created)
 ├── trainedModels 
 ├── requirements.txt             
 
@@ -26,7 +28,7 @@ RadProPoser/
 ---
 
 ## Installation
-A working installation of CUDA should be provided if GPU should be used.
+A working installation of CUDA should be provided if GPU should be used. We used python 3.12 for the analysis.
 To get started with the project, follow the steps below:
 
 1. **Set up a virtual environment**:
@@ -51,17 +53,31 @@ To get started with the project, follow the steps below:
 ---
 
 ## Radar-based Human Pose Estimation
-### 1. Create data and train the model
-Change the root path in the /config.py file in /tools. The train data is automaticlly generated based on specified parameters and directories in the file. The model is trained using weights and biases (wandb) tool. You have to create an account.
+
+### 1. Configuration
+Before training or testing, configure the model in `tools/config.py`:
+- Set `MODELNAME` to the model you want to train. default is the best performing model as described in the paper
+- Set `PATHORIGIN` to your data root path
+- Set `PATHRAW` to your raw radar data path
+
+### 2. Training
+The training data (unfolded sequences) is automatically generated based on specified parameters and directories in `config.py`. Around 1.7 to 2 TB of free disk space should be available. The model is trained using Weights and Biases (wandb). You need to create a wandb account.
+
 Create data and train the model:
 ```bash
 python tools/trainScript.py
 ```
 
-### 2. Evaluate the Model
-Run evaluation on the test set:
+### 3. Testing
+Run evaluation on the test set. Results are saved to `tools/calibration_analysis/`:
 ```bash
 python tools/testing.py
+```
+
+### 4. Calibration Analysis and Recalibration
+After testing, run recalibration analysis. This fits recalibration models on validation data (p1) and evaluates on test data (p2, p12). Results and plots are saved to `tools/calibration_plots/` and `tools/calibrated_models/`:
+```bash
+python tools/calibration_test.py
 ```
 
 

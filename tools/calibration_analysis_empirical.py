@@ -32,26 +32,30 @@ class MultiModelRecalibrationVisualizer:
 
     def save_models(self, directory: str):
         """
-        Serialize each model-type’s list of per-dimension regressors
+        Serialize each model-type's list of per-dimension regressors
         to disk under `directory/`, one .pkl per model-type.
         """
-        os.makedirs(directory, exist_ok=True)
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        full_path = os.path.join(base_dir, directory)
+        os.makedirs(full_path, exist_ok=True)
         for model_type, mdl_list in self.models.items():
-            path = os.path.join(directory, f"{model_type}.pkl")
+            path = os.path.join(full_path, f"{model_type}.pkl")
             joblib.dump(mdl_list, path)
         print(f"Saved {len(self.models)} model types to '{directory}'")
 
     def load_models(self, directory: str):
         """
-        Load each model-type’s .pkl file from `directory/` back into self.models.
+        Load each model-type's .pkl file from `directory/` back into self.models.
         Expects files like `isotonic.pkl`, `rf100.pkl`, etc.
         """
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        full_path = os.path.join(base_dir, directory)
         for model_type in list(self.models.keys()):
-            path = os.path.join(directory, f"{model_type}.pkl")
+            path = os.path.join(full_path, f"{model_type}.pkl")
             if not os.path.isfile(path):
                 raise FileNotFoundError(f"Could not find calibration file '{path}'")
             self.models[model_type] = joblib.load(path)
-        print(f"Loaded {len(self.models)} model types from '{directory}'")
+        print(f"Loaded {len(self.models)} model types from '{full_path}'")
 
     def _get_cdf_at_y(self, samples: np.ndarray, gt: np.ndarray) -> np.ndarray:
         """
@@ -150,8 +154,10 @@ class MultiModelRecalibrationVisualizer:
         ax.set_aspect("equal")
         ax.grid(True, linestyle=":")
         ax.legend(frameon=False)
-        os.makedirs("calibration_plots", exist_ok=True)
-        plt.savefig("calibration_plots/calibration.pdf", dpi=500)
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        plots_dir = os.path.join(base_dir, "calibration_plots")
+        os.makedirs(plots_dir, exist_ok=True)
+        plt.savefig(os.path.join(plots_dir, "calibration.pdf"), dpi=500)
         plt.show()
 
     def _compute_calibration_error(self, cdf: np.ndarray, num_bins: int = 100) -> float:

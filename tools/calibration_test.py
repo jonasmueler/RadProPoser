@@ -16,19 +16,22 @@ MODELS = {
 }
 
 def load_data(model_suffix: str):
-    mu_val = np.load(f"calibration_analysis/mu_validation_{model_suffix}.npy")
-    var_val = np.load(f"calibration_analysis/var_validation_{model_suffix}.npy")
-    gt_val = np.load(f"calibration_analysis/gt_validation_{model_suffix}.npy")
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    calib_dir = os.path.join(base_dir, "calibration_analysis")
     
-    mu_test = np.load(f"calibration_analysis/mu_testing_{model_suffix}.npy")
-    var_test = np.load(f"calibration_analysis/var_testing_{model_suffix}.npy")
-    gt_test = np.load(f"calibration_analysis/gt_testing_{model_suffix}.npy")
+    mu_val = np.load(os.path.join(calib_dir, f"mu_validation_{model_suffix}.npy"))
+    var_val = np.load(os.path.join(calib_dir, f"var_validation_{model_suffix}.npy"))
+    gt_val = np.load(os.path.join(calib_dir, f"gt_validation_{model_suffix}.npy"))
+    
+    mu_test = np.load(os.path.join(calib_dir, f"mu_testing_{model_suffix}.npy"))
+    var_test = np.load(os.path.join(calib_dir, f"var_testing_{model_suffix}.npy"))
+    gt_test = np.load(os.path.join(calib_dir, f"gt_testing_{model_suffix}.npy"))
     
     ensemble_val = None
     ensemble_test = None
     
-    val_path = f"calibration_analysis/ensemble_validation_{model_suffix}.npy"
-    test_path = f"calibration_analysis/ensemble_testing_{model_suffix}.npy"
+    val_path = os.path.join(calib_dir, f"ensemble_validation_{model_suffix}.npy")
+    test_path = os.path.join(calib_dir, f"ensemble_testing_{model_suffix}.npy")
     
     if os.path.exists(val_path):
         ensemble_val = np.load(val_path)
