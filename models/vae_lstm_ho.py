@@ -9,6 +9,13 @@ from edl_pytorch import NormalInvGamma
 from torch.distributions import Laplace
 from transformer import Transformer
 from torch.func import vmap
+import sys
+from pathlib import Path
+import warnings
+
+# Add parent directory to path to import from tools
+sys.path.append(str(Path(__file__).parent.parent))
+from tools.config import *
 
 class HighResolutionModule(nn.Module):
     def __init__(
@@ -447,7 +454,21 @@ class RadProPoserVAE(nn.Module):
         self.sigma = nn.Sequential(nn.Linear(2048, 256))
         self.varianceScaling = nn.Parameter(torch.tensor(0.1))
         self.Nsamples = 500
-        self.latent_dist = "gaussian"
+
+        # specify latent distribution
+        if MODELNAME in ["RPPgaussianGaussian", "RPPgaussianLaplace"]:
+            self.latent_dist = "gaussian"
+
+        elif MODELNAME in ["RPPlaplaceLaplace", "RPPlaplaceGaussian"]:
+            self.latent_dist = "laplace"
+
+        else:
+            warnings.warn(
+                "Invalid model configuration detected. "
+                "Check the model name and likelihood combination. "
+                "This may lead to incorrect training behavior.",
+                category=UserWarning
+            )
 
         # decoder 
         self.decoder = nn.Sequential(
@@ -532,10 +553,9 @@ class RadProPoserVAE(nn.Module):
         
         return mu, sigma
     
-    
-
     def forward(self, 
-                x: torch.Tensor):
+                x: torch.Tensor, 
+                return_samples: bool = False):
         # fft layer 
         x = self.preProcess(x) # watch out with batch = 1
         device = x.device
@@ -552,9 +572,6 @@ class RadProPoserVAE(nn.Module):
         spatiotemp = torch.stack(spatFeat, dim = 1)
         spatiotemp = self.former(spatiotemp).flatten(start_dim = 1, end_dim = -1)
 
-        # fuse together to get mu and sgm
-        #spatiotemp = torch.cat(spatFeat, dim = 1)
-
         # get latent 
         mu = self.mu(spatiotemp)
         sigma = self.sigma(spatiotemp)
@@ -562,7 +579,6 @@ class RadProPoserVAE(nn.Module):
         if self.latent_dist == "laplace":
             samples = self.decoder(torch.stack([self.sample_laplace(mu, sigma) for i in range(self.Nsamples)], dim = 1))
 
-        
         else: # gaussian
             samples = self.decoder(torch.stack([self.sample(mu, sigma, device = device) for i in range(self.Nsamples)], dim = 1))
         
@@ -571,8 +587,10 @@ class RadProPoserVAE(nn.Module):
 
         samples = samples.permute(0, 2, 1)
 
-        #return self.decoder(self.sample(mu, sigma)), mu, sigma, muOut, varOut
-        return None, mu, sigma, muOut, varOut, 
+        if return_samples:
+            return samples, mu, sigma, muOut, varOut
+        else: 
+            return None, mu, sigma, muOut, varOut
 
 class RadProPoserVAECov(nn.Module):
     def __init__(self):
@@ -615,25 +633,6 @@ class RadProPoserVAECov(nn.Module):
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std).to(device) * self.varianceScaling 
         return mu + eps * std
-    
-    def sample_laplace(self, 
-                       mu: torch.Tensor, 
-                       b_raw: torch.Tensor) -> torch.Tensor:
-        """
-        Sample from Laplace(mu, b), where b is passed as raw (unconstrained) values.
-        Softplus is applied to ensure positive scale.
-
-        Args:
-            mu: Mean tensor, shape (..., latent_dim)
-            b_raw: Raw (unconstrained) scale tensor, shape (..., latent_dim)
-
-        Returns:
-            z: Differentiable sample from Laplace(mu, b), same shape as mu
-        """
-        b = torch.nn.functional.softplus(b_raw) + 1e-6  # ensure b > 0
-        dist = Laplace(loc=mu, scale=b)
-        return dist.rsample()
-
     
     def preProcess(self, 
                    x: torch.Tensor):
@@ -719,10 +718,9 @@ class RadProPoserVAECov(nn.Module):
         
         return mu, sigma
     
-    
-
     def forward(self, 
-                x: torch.Tensor):
+                x: torch.Tensor, 
+                return_samples: bool = False):
         # fft layer 
         x = self.preProcess(x) # watch out with batch = 1
         device = x.device
@@ -739,160 +737,22 @@ class RadProPoserVAECov(nn.Module):
         spatiotemp = torch.stack(spatFeat, dim = 1)
         spatiotemp = self.former(spatiotemp).flatten(start_dim = 1, end_dim = -1)
 
-        # fuse together to get mu and sgm
-        #spatiotemp = torch.cat(spatFeat, dim = 1)
-
         # get latent 
         mu = self.mu(spatiotemp)
         sigma = self.sigma(spatiotemp)
 
-        if self.latent_dist == "laplace":
-            samples = self.decoder(torch.stack([self.sample_laplace(mu, sigma) for i in range(self.Nsamples)], dim = 1))
-
         
-        else: # gaussian
-            samples = self.decoder(torch.stack([self.sample(mu, sigma, device = device) for i in range(self.Nsamples)], dim = 1))
+        samples = self.decoder(torch.stack([self.sample(mu, sigma, device = device) for i in range(self.Nsamples)], dim = 1))
 
         samples = samples.permute(0, 2, 1)
 
-        muOut, cov = self.ensemble_stats_var(samples)
+        muOut, cov = self.ensemble_stats(samples)
 
-        #return self.decoder(self.sample(mu, sigma)), mu, sigma, muOut, varOut
-        return None, mu, sigma, muOut, cov, samples
+        if return_samples:
+            return samples, mu, sigma, muOut, cov
+        else: 
+            return None, mu, sigma, muOut, cov
 
-
-
-class ResidualMLP(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.block = nn.Sequential(
-            nn.Linear(dim, dim // 2),
-            nn.GELU(),
-            nn.Linear(dim // 2, dim)
-        )
-
-    def forward(self, x):
-        return x + self.block(x)
-
-
-class RadProPoserPad(nn.Module):
-    def __init__(self):
-        super(RadProPoserPad, self).__init__()
-
-        # backbone 
-        self.backbone = HighResolution3DNet(
-            MODEL_CONFIGS["hr_tiny_feat64_zyx_l4_in64"], full_res_stem=True)
-        
-        self.bottleNeck = nn.Sequential(
-                nn.Conv3d(in_channels=384, out_channels=32, kernel_size=(1, 2, 8), stride=(1, 2, 8)),  # 3x3x3 conv
-                nn.BatchNorm3d(32),  # Batch normalization
-                nn.ReLU(inplace=False),  # ReLU activation
-
-                nn.Conv3d(in_channels=32, out_channels=8, kernel_size=(1, 2, 8), stride=(1, 2, 8)),  # 3x3x3 conv
-                nn.BatchNorm3d(8),  # Batch normalization
-                nn.ReLU(inplace=False),  # ReLU activation
-
-                nn.Flatten(start_dim = 1, end_dim = -1)
-            )
-
-        
-        # latent space 
-        
-        self.out = nn.Sequential(nn.LayerNorm(2048), 
-                                 nn.Linear(2048, 256),
-                                 nn.Linear(256, 128), 
-                                 nn.Linear(128, 78))
-    
-    def preProcess(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Preprocess MIMO FMCW radar tensor on GPU.
-
-        Steps:
-        1. Clutter removal
-        2. Windowing (Hann) on all FFT dimensions
-        3. Zero-padding azimuth and elevation to 64
-        4. FFT in Doppler, Range, Elevation, Azimuth order
-        5. Frequency centering using torch.fft.fftshift
-        6. Permute for model input
-
-        Args:
-            x (torch.Tensor): Input tensor of shape (B, C, A, E, R, D) on GPU
-
-        Returns:
-            torch.Tensor: Output tensor of shape (B, C, D, A, E, R)
-        """
-        device = x.device
-
-        # Step 1: Clutter removal (mean subtraction along Doppler axis)
-        x = x - torch.mean(x, dim=-1, keepdim=True)
-
-        # Step 2: Windowing
-        B, C, A, E, R, D = x.shape
-        az_win = torch.hann_window(A, device=device).view(1, 1, A, 1, 1, 1)
-        el_win = torch.hann_window(E, device=device).view(1, 1, 1, E, 1, 1)
-        ra_win = torch.hann_window(R, device=device).view(1, 1, 1, 1, R, 1)
-        do_win = torch.hann_window(D, device=device).view(1, 1, 1, 1, 1, D)
-        x = x * az_win * el_win * ra_win * do_win
-
-        # Step 3: Zero-padding azimuth and elevation to size 64
-        az_pad = (0, 0, 0, 0, 0, 16 - A)
-        x = F.pad(x, pad=az_pad, mode='constant', value=0)
-        el_pad = (0, 0, 0, 16 - E)
-        x = F.pad(x, pad=el_pad, mode='constant', value=0)
-        # Now shape is (B, C, 64, 64, R, D)
-
-        # Step 4: Apply FFTs (order: Doppler, Range, Elevation, Azimuth)
-        x = torch.fft.fft(x, dim=-1, norm="forward")  # Doppler
-        x = torch.fft.fft(x, dim=-2, norm="forward")  # Range
-        x = torch.fft.fft(x, dim=-3, norm="forward")  # Elevation
-        x = torch.fft.fft(x, dim=-4, norm="forward")  # Azimuth
-
-        # Step 5: Center frequencies
-        x = torch.fft.fftshift(x, dim=(-1, -2, -3, -4))
-
-        # Step 6: Permute for model input (B, C, D, A, E, R)
-        x = x.permute(0, 1, 5, 2, 3, 4)
-
-        abs = torch.log(torch.abs(x))
-        phase = torch.angle(x)
-
-        return abs, phase
-
-    def applyBackbone(self, x: torch.Tensor):
-        # get features
-        featureList = self.backbone(x)
-
-        # interpolate to same size
-        features = []
-        for feature in featureList:
-            helper = F.interpolate(feature.float(), size=(4, 16, 76), mode='trilinear')
-            features.append(helper)
-        
-        features = torch.cat(features, dim = 1)
-        features = self.bottleNeck(features)
-
-        return features
-    
-    def forward(self, 
-                x: torch.Tensor):
-        # fft layer 
-        abs, phase = self.preProcess(x) # watch out with batch = 1
-        device = x.device
-
-        # part in real and imag
-        xComp = [abs, phase]
-        spatFeat = []
-        for elmt in xComp:
-            for i in range(elmt.size(1)):
-                helper = self.applyBackbone(elmt[:,i].float())
-                spatFeat.append(helper)
-        
-        # fuse together to get mu and sgm
-        spatiotemp = torch.cat(spatFeat, dim = 1)
-
-        out = self.out(spatiotemp)
-
-        return out 
 
 class LSTMModel(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers, output_size):
@@ -1019,8 +879,6 @@ class HRRadarPose(nn.Module):
                 nn.Flatten(start_dim = 1, end_dim = -1), 
                 nn.Linear(128, 78)
             )
-
-    
 
     def preProcess(self, 
                    x: torch.Tensor):

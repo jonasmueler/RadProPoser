@@ -8,14 +8,27 @@ import sys
 import random 
 import numpy as np 
 import torch.nn as nn
+import warnings
 
-## LOAD MODEL HERE
+# load model
 sys.path.append(MODELPATH)
-#from evidential_pose_regression import RadProPoserEvidential as Encoder
-from vae_lstm_ho import RadProPoserVAECov as Encoder
-#from normalizing_flow import RadProPoserVAE as Encoder
-#from vae_lstm_ho import CNN_LSTM as Encoder
-#from models import HRRadarPose as Encoder
+if MODELNAME in ("RPPgaussianGaussian", "RPPlaplaceLaplace", "RPPlaplaceGaussian", "RPPgaussianLaplace"):
+    from vae_lstm_ho import RadProPoserVAE as Encoder
+elif MODELNAME in ("RPPgaussianGaussianCov"):
+    from vae_lstm_ho import RadProPoserVAECov as Encoder
+elif MODELNAME in ("RPPevidential"):
+    from evidential_pose_regression import RadProPoserEvidential as Encoder
+elif MODELNAME in ("RPPnormalizingFlow"):
+    from normalizing_flow import RadProPoserVAE as Encoder
+elif MODELNAME in ("HoEtAlBaseline"):
+    from models import HRRadarPose as Encoder
+else:
+    warnings.warn(
+        "Invalid model configuration detected. "
+        "Check the model name and likelihood combination. "
+        "This may lead to incorrect training behavior.",
+        category=UserWarning
+    )
 
 CF = Encoder().to(TRAINCONFIG["device"])
 
@@ -47,10 +60,6 @@ def loadCheckpoint(model: nn.Module,
         model.load_state_dict(checkpoint['model'])
         print("checkpoint loaded")
         return model
-
-# load model 
-#CF = loadCheckpoint(CF, None, "/home/jonas/code/RadProPoser/trainedModels/humanPoseEstimation/RadProPoserVAE2")
-
 
 ## set seed 
 def setSeed(seed: int):

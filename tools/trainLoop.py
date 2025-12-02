@@ -293,34 +293,46 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
             radar = radar.to(device).to(torch.complex64)
             #radar2 = radar.to(device).float() # .to(torch.complex64)
             gt = gt.to(device).float() * 100 # convert to cm
-    
-            
+                
             # zero the parameter gradients
             optimizer.zero_grad()
 
-
             # loss functions
             if TRAINCONFIG["nll"] == True:
-                preds, mu, logVar, muOut, varOut = model.forward(radar)
-                KLloss = KLLoss(mu, logVar) 
-                #nLL, pen = nllLoss(gt, muOut, varOut)
-                #nLL, pen = laplace_nll(gt, muOut, varOut)
-                nLL, pen = nll_from_cov(gt, muOut, varOut)
+                preds, mu, logVar, muOut, varOut = model.forward(radar) #varOut can also be covariance
+
+                # check for different likelihoods 
+                if MODELNAME in ("RPPgaussianGaussian"):
+                    KLloss = KLLoss(mu, logVar) 
+                    nLL, pen = nllLoss(gt, muOut, varOut)
+                elif MODELNAME in ("RPPgaussianGaussianCov"):
+                     KLloss = KLLoss(mu, logVar)
+                     nLL, pen = nll_from_cov(gt, muOut, varOut)
+                
+                elif MODELNAME in ("RPPlaplaceGaussian"): #laplace latent has no KL div term
+                     nLL, pen = nllLoss(gt, muOut, varOut)
+                     KLloss = torch.zeros_like(nLL).to(TRAINCONFIG["device"])
+
+                elif MODELNAME in ("RPPgaussianLaplace"): 
+                     nLL, pen = laplace_nll(gt, muOut, varOut)
+                     KLloss = KLLoss(mu, logVar)
+
+                elif MODELNAME in ("RPPlaplaceLaplace"):
+                    nLL, pen = laplace_nll(gt, muOut, varOut)
+                    KLloss = torch.zeros_like(nLL).to(TRAINCONFIG["device"])
 
                 loss = nLL + TRAINCONFIG["beta"] * KLloss
 
             elif TRAINCONFIG["nf"] == True:
                     mu, kld = model.forward(radar, inference = False)
-
                     loss = criterion(mu, gt) +  TRAINCONFIG["beta"] * kld
             
             elif TRAINCONFIG["evd"] == True:
-                # generator loss
                 pred_nig = model(radar)
 
                 loss = evidential_regression(
                         pred_nig,      # predicted Normal Inverse Gamma parameters
-                        gt,             # target labels
+                        gt,             
                         lamb=TRAINCONFIG["lambda"],    # regularization coefficient 
                     )
             
@@ -330,7 +342,6 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                      loss_root = criterion(root, gt[:,0])
                      gt_offset = gt - gt[:, 0].unsqueeze(dim = 1)
                      loss_offset = criterion(gt_offset[:, 1:], offsets)
-
                      loss = loss_root + loss_offset
 
                
@@ -385,22 +396,15 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                 y = y.to(device).float() * 100
 
                 if TRAINCONFIG["nll"] == True:
-                    _, _, _, preds, logvar = model.forward(x)
-
-                    var = torch.exp(logvar)
+                    _, _, _, preds, _ = model.forward(x)
                 
                 elif TRAINCONFIG["nf"] == True:
                     preds = model.forward(x, inference = True)
 
-
                 elif TRAINCONFIG["evd"] == True:
-                    # generator loss
                     preds = model(x) # (mu, v, alpha, beta)
                     preds = preds[0]
                     
-
-
-                
                 elif TRAINCONFIG["HR_SINGLE"] == True:
                      root, offset = model(x)
                      preds = root.unsqueeze(dim = 1) + offset
@@ -409,8 +413,7 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                 else:
                     preds = model.forward(x)
 
-                # calculate validation loss
-                
+                # calculate validation loss    
                 valLoss = MPJPE(preds, y)
                 valLossMean += valLoss
 

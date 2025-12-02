@@ -8,23 +8,8 @@ import sys
 from config import *
 import trainLoop
 
-def evidential_uncertainty(v: torch.Tensor, 
-                           alpha: torch.Tensor, 
-                           beta: torch.Tensor) -> torch.Tensor:
-    # Clamp for numerical stability
-    #v = torch.clamp(v, min=1.0)
-    #alpha = torch.clamp(alpha, min=1.1)
-    #beta = torch.clamp(beta, max=1e6)
-
-    aleatoric = beta / (alpha - 1)
-    epistemic = beta / (v * (alpha - 1))
-
-    #return aleatoric + epistemic
-    return aleatoric 
-
-
 class RadarPoseTester:
-    def __init__(self,root_path: str, seq_len: int = SEQLEN, device: str = TRAINCONFIG["device"]):
+    def __init__(self, root_path: str, seq_len: int = SEQLEN, device: str = TRAINCONFIG["device"]):
         self.root_path = root_path
         self.seq_len = seq_len
         self.device = device
@@ -61,16 +46,6 @@ class RadarPoseTester:
                          Y: torch.Tensor, 
                          scaling: bool = True, 
                          reflection: str = 'best'):
-        """
-        PyTorch implementation of Procrustes analysis. Aligns Y to X.
-        Inputs:
-            X: [N, 3] - target coordinates
-            Y: [N, 3] - input coordinates to align
-            scaling: bool - whether to apply scaling
-            reflection: 'best' | True | False - control reflection in the transform
-        Returns:
-            Z: [N, 3] - aligned Y
-        """
         muX = X.mean(dim=0, keepdim=True)
         muY = Y.mean(dim=0, keepdim=True)
 
@@ -127,56 +102,83 @@ class RadarPoseTester:
     def predict_sequence(self, combination: list[str], keypoints: bool = False, return_preds: bool = False):
         radar, target = self.load_sequence(combination)
         if radar is None or target is None:
-            return (None,) * 5
+            return (None,) * 6
 
         batch_size = 32
-        preds, vars, cdfs = [], [], []
+        preds, vars, ensembles = [], [], []
 
         self.model.eval()
         with torch.no_grad():
             for i in tqdm(range(0, radar.size(0) - self.seq_len, batch_size), desc=f"Predicting {'_'.join(combination)}"):
                 end = min(i + batch_size, radar.size(0) - self.seq_len)
                 batch = torch.stack([radar[j:j+self.seq_len] for j in range(i, end)])
-                #_, _, _, mu, var = self.model(batch)
-                #out = self.model(batch)
-                #mu = out[0]
-                #var = evidential_uncertainty(out[1], out[2], out[3])
-                mu, var, cdf = self.model(batch, inference = True)
+                
+                if MODELNAME in ("RPPgaussianGaussian", "RPPlaplaceLaplace", "RPPlaplaceGaussian", "RPPgaussianLaplace"):
+                    ensemble, _, _, mu, var = self.model(batch, return_samples=True)
+                elif MODELNAME == "RPPgaussianGaussianCov":
+                    ensemble, _, _, mu, cov = self.model(batch, return_samples=True)
+                    var = cov.diagonal(dim1=-2, dim2=-1)
+                elif MODELNAME == "RPPnormalizingFlow":
+                    mu, var, ensemble = self.model(batch, inference=True)
+                elif MODELNAME == "RPPevidential":
+                    out_uncertainty, ensemble = self.model(batch)
+                    mu = out_uncertainty[0]
+                    var = torch.var(ensemble, dim=-1)
+                elif MODELNAME == "HoEtAlBaseline":
+                    root, offsets = self.model(batch)
+                    mu = root.unsqueeze(dim=1) + offsets
+                    mu = torch.cat([root.unsqueeze(dim=1), mu], dim=1)
+                    var = torch.zeros_like(mu)
+                    ensemble = None
+                else:
+                    mu = self.model(batch)
+                    var = torch.zeros_like(mu)
+                    ensemble = None
+
                 preds.append(mu)
                 vars.append(var)
-                cdfs.append(cdf)
-
+                if ensemble is not None:
+                    ensembles.append(ensemble)
 
         preds = torch.cat(preds, dim=0)
         vars = torch.cat(vars, dim=0)
         gts = target[self.seq_len:].reshape(-1, 26 * 3).to(self.device)
-        cdfs = torch.cat(cdfs)
+        
+        if ensembles:
+            ensembles = torch.cat(ensembles, dim=0)
+        else:
+            ensembles = None
 
         error, std = self.compute_p_mpjpe(preds, gts, keypoints)
         print(error)
-        return error, std, preds, vars, gts, cdfs
+        return error, std, preds, vars, gts, ensembles
 
     def evaluate(self, test_set: list[list[str]], keypoints: bool = False):
-        losses, stds, preds, vars, gts, cdfs = [], [], [], [], [], []
+        losses, stds, preds, vars, gts, ensembles = [], [], [], [], [], []
 
         for comb in test_set:
-            mean, std, pred, var, gt, cdf = self.predict_sequence(comb, keypoints)
+            mean, std, pred, var, gt, ensemble = self.predict_sequence(comb, keypoints)
             if mean is not None:
                 losses.append(mean)
                 stds.append(std)
                 preds.append(pred)
                 vars.append(var)
                 gts.append(gt)
-                cdfs.append(cdf)
+                if ensemble is not None:
+                    ensembles.append(ensemble)
 
         error = torch.mean(torch.stack(losses), dim=0)
         std = torch.mean(torch.stack(stds), dim=0)
         preds = torch.cat(preds, dim=0)
         vars = torch.cat(vars, dim=0)
         gts = torch.cat(gts, dim=0)
-        cdfs = torch.cat(cdfs, dim=0)
+        
+        if ensembles:
+            ensembles = torch.cat(ensembles, dim=0)
+        else:
+            ensembles = None
 
-        return error, std, preds, vars, gts
+        return error, std, preds, vars, gts, ensembles
 
     def evaluate_single(
         self,
@@ -184,19 +186,6 @@ class RadarPoseTester:
         keypoints: bool = False,
         batch_size: int = 32
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        For each combination in test_set, load its radar frames and targets,
-        predict point estimates in batches of size batch_size (μ only),
-        fill variances with zeros, compute p-MPJPE & std per combination,
-        then aggregate across all combinations.
-
-        Returns:
-            error (torch.Tensor): mean p-MPJPE over all combos
-            std   (torch.Tensor): mean std dev over all combos
-            preds (torch.Tensor): all μ preds stacked [N_total, 78]
-            vars  (torch.Tensor): zero variances [N_total, 78]
-            gts   (torch.Tensor): all ground truths [N_total, 78]
-        """
         losses, stds = [], []
         all_preds, all_vars, all_gts = [], [], []
 
@@ -214,25 +203,22 @@ class RadarPoseTester:
                     end = min(i + batch_size, total)
                     batch_frames = radar[i:end].to(self.device)
 
-                    # If your model still requires a time dimension of length 1, uncomment:
-                    # batch_in = batch_frames.unsqueeze(1)  # [B,1,C,H,W]
-                    # Otherwise feed it directly:
-                    batch_in = batch_frames                     # [B,C,H,W]
-
-                    # forward: returns (_,_,_, μ, _)
-                    root, offset = self.model(batch_in)
-                    preds = root.unsqueeze(dim = 1) + offset
-                    preds = torch.cat([root.unsqueeze(dim = 1), preds], dim = 1)
+                    if MODELNAME == "HoEtAlBaseline":
+                        root, offset = self.model(batch_frames)
+                        preds = root.unsqueeze(dim=1) + offset
+                        preds = torch.cat([root.unsqueeze(dim=1), preds], dim=1)
+                    else:
+                        preds = self.model(batch_frames)
+                    
                     preds_batches.append(preds)
 
                     gts_batch = target[i:end].reshape(-1, 26 * 3).to(self.device)
                     gts_batches.append(gts_batch)
 
-            preds = torch.cat(preds_batches, dim=0)     # [N_frames, 78]
-            gts   = torch.cat(gts_batches,   dim=0)     # [N_frames, 78]
-            vars_ = torch.zeros_like(preds)             # zeros for var
+            preds = torch.cat(preds_batches, dim=0)
+            gts = torch.cat(gts_batches, dim=0)
+            vars_ = torch.zeros_like(preds)
 
-            # compute p-MPJPE & std for this comb
             error, std = self.compute_mpjpe(preds, gts, keypoints)
 
             losses.append(error)
@@ -241,39 +227,43 @@ class RadarPoseTester:
             all_vars.append(vars_)
             all_gts.append(gts)
 
-        # aggregate over combinations
         error = torch.mean(torch.stack(losses), dim=0)
-        std   = torch.mean(torch.stack(stds),   dim=0)
+        std = torch.mean(torch.stack(stds), dim=0)
         preds = torch.cat(all_preds, dim=0)
-        vars  = torch.cat(all_vars,  dim=0)
-        gts   = torch.cat(all_gts,   dim=0)
+        vars = torch.cat(all_vars, dim=0)
+        gts = torch.cat(all_gts, dim=0)
 
         return error, std, preds, vars, gts
 
-
-
     def run_evaluation(self, parts, angles, actions, reps, model_path: str):
         sys.path.append(MODELPATH)
-        #from vae_lstm_ho import RadProPoserVAE
-        from normalizing_flow import RadProPoserVAE
-        #from vae_lstm_ho import CNN_LSTM
-        #from vae_lstm_ho import HRRadarPose
-        #from evidential_pose_regression import RadProPoserEvidential
-        #self.model = RadProPoserVAE().to(self.device)
-        self.model = RadProPoserVAE().to(self.device)
-        #self.model = CNN_LSTM().to(self.device)
-        #self.model = RadProPoserEvidential().to(self.device)
+        
+        if MODELNAME in ("RPPgaussianGaussian", "RPPlaplaceLaplace", "RPPlaplaceGaussian", "RPPgaussianLaplace"):
+            from vae_lstm_ho import RadProPoserVAE as Encoder
+        elif MODELNAME == "RPPgaussianGaussianCov":
+            from vae_lstm_ho import RadProPoserVAECov as Encoder
+        elif MODELNAME == "RPPevidential":
+            from evidential_pose_regression import RadProPoserEvidential as Encoder
+        elif MODELNAME == "RPPnormalizingFlow":
+            from normalizing_flow import RadProPoserVAE as Encoder
+        elif MODELNAME == "HoEtAlBaseline":
+            from vae_lstm_ho import HRRadarPose as Encoder
+        else:
+            from vae_lstm_ho import CNN_LSTM as Encoder
+
+        self.model = Encoder().to(self.device)
         self.model = trainLoop.loadCheckpoint(self.model, None, model_path)
         self.model.eval()
-        all_preds, all_gts, all_vars, all_cdfs = [], [], [], []
+        all_preds, all_gts, all_vars, all_ensembles = [], [], [], []
+        val_preds, val_gts, val_vars, val_ensembles = [], [], [], []
+        test_preds, test_gts, test_vars, test_ensembles = [], [], [], []
         results_by_participant = {}
 
         for part in parts:
             results_by_participant[part] = {}
             for angle in angles:
                 combos = [[part, angle, act, rep] for act in actions for rep in reps]
-                error, std, preds, vars, gts, cdfs = self.evaluate(combos)
-                
+                error, std, preds, vars, gts, ensembles = self.evaluate(combos)
 
                 if isinstance(error, torch.Tensor):
                     error = error.item() if error.numel() == 1 else error.cpu().numpy()
@@ -285,16 +275,46 @@ class RadarPoseTester:
                     "std": std
                 }
 
-                all_preds.append(preds.cpu().numpy())
-                all_gts.append(gts.cpu().numpy())
-                all_vars.append(vars.cpu().numpy())
-                all_cdfs.append(cdfs.cpu().numpy())
+                preds_np = preds.cpu().numpy()
+                gts_np = gts.cpu().numpy()
+                vars_np = vars.cpu().numpy()
+                ensembles_np = ensembles.cpu().numpy() if ensembles is not None else None
+
+                all_preds.append(preds_np)
+                all_gts.append(gts_np)
+                all_vars.append(vars_np)
+                if ensembles_np is not None:
+                    all_ensembles.append(ensembles_np)
+
+                if part == "p1":
+                    val_preds.append(preds_np)
+                    val_gts.append(gts_np)
+                    val_vars.append(vars_np)
+                    if ensembles_np is not None:
+                        val_ensembles.append(ensembles_np)
+                else:
+                    test_preds.append(preds_np)
+                    test_gts.append(gts_np)
+                    test_vars.append(vars_np)
+                    if ensembles_np is not None:
+                        test_ensembles.append(ensembles_np)
 
         os.makedirs("calibration_analysis", exist_ok=True)
-        np.save("calibration_analysis/mu_testing_nf.npy", np.concatenate(all_preds, axis=0))
-        np.save("calibration_analysis/gt_testing_nf.npy", np.concatenate(all_gts, axis=0))
-        np.save("calibration_analysis/var_testing_nf.npy", np.concatenate(all_vars, axis=0))
-        np.save("calibration_analysis/cdf_testing_nf.npy", np.concatenate(all_cdfs, axis=0))
+        model_suffix = MODELNAME.lower() if MODELNAME else "default"
+
+        if val_preds:
+            np.save(f"calibration_analysis/mu_validation_{model_suffix}.npy", np.concatenate(val_preds, axis=0))
+            np.save(f"calibration_analysis/gt_validation_{model_suffix}.npy", np.concatenate(val_gts, axis=0))
+            np.save(f"calibration_analysis/var_validation_{model_suffix}.npy", np.concatenate(val_vars, axis=0))
+            if val_ensembles:
+                np.save(f"calibration_analysis/ensemble_validation_{model_suffix}.npy", np.concatenate(val_ensembles, axis=0))
+
+        if test_preds:
+            np.save(f"calibration_analysis/mu_testing_{model_suffix}.npy", np.concatenate(test_preds, axis=0))
+            np.save(f"calibration_analysis/gt_testing_{model_suffix}.npy", np.concatenate(test_gts, axis=0))
+            np.save(f"calibration_analysis/var_testing_{model_suffix}.npy", np.concatenate(test_vars, axis=0))
+            if test_ensembles:
+                np.save(f"calibration_analysis/ensemble_testing_{model_suffix}.npy", np.concatenate(test_ensembles, axis=0))
 
         return results_by_participant
 
@@ -302,11 +322,11 @@ if __name__ == "__main__":
     tester = RadarPoseTester(root_path=PATHRAW)
 
     res = tester.run_evaluation(
-        parts= ["p2", "p12"],#["p1"], #, "p2", "p12"],
+        parts=["p1", "p2", "p12"],
         angles=["an0", "an1", "an2"],
         actions=["ac1", "ac2", "ac3", "ac4", "ac5", "ac6", "ac7", "ac8", "ac9"],
         reps=["r0", "r1"],
-        model_path=os.path.join(HPECKPT, "/home/jonas/code/RadProPoser/trainedModels/nf23")
+        model_path=os.path.join(HPECKPT, MODELNAME)
     )
 
     print(res)

@@ -2,57 +2,73 @@ import os
 
 ## globals
 SEQLEN = 8
-MODELNAME = None # set the name of the model you want to train  here
+MODELNAME = "RPPgaussianGaussianCov" # set the name of the model you want to train  here
 
 ############################################### HPE #######################################################################
 ## model paramas
 
 if MODELNAME in ("RPPgaussianGaussian", "RPPgaussianGaussianCov"):
   TRAINCONFIG = {"learningRate": 0.001, 
-            "weightDecay": 0.0001,
-            "epochs": 24, 
-            "batchSize": 16, 
-          "optimizer": "adam", 
-            "device": "cuda", 
-            "betas": (0.9, 0.999), # momentum and scaling for ADAM, 
-            "lrDecay": 0.99, 
-          "beta": 20, 
-          "gamma": 5,  
-            "nll": True,
-          "evd": False,
-            "nf": False
+                  "weightDecay": 0.0001,
+                  "epochs": 24, 
+                  "batchSize": 16, 
+                  "optimizer": "adam", 
+                  "device": "cuda", 
+                  "betas": (0.9, 0.999), # momentum and scaling for ADAM, 
+                  "lrDecay": 0.99, 
+                  "beta": 20, 
+                  "gamma": 5,  
+                  "nll": True,
+                  "evd": False,
+                  "nf": False
             }
 
 if MODELNAME in ("RPPlaplaceLaplace"):
   TRAINCONFIG = {"learningRate": 0.001, 
-            "weightDecay": 0.0001,
-            "epochs": 24, 
-            "batchSize": 16, 
-          "optimizer": "adam", 
-            "device": "cuda", 
-            "betas": (0.9, 0.999), # momentum and scaling for ADAM, 
-            "lrDecay": 0.99, 
-          "beta": 1, 
-          "gamma": 1, 
-            "nll": True,
-          "evd": False,
-            "nf": False
+                 "weightDecay": 0.0001,
+                 "epochs": 24, 
+                 "batchSize": 16, 
+                 "optimizer": "adam", 
+                 "device": "cuda", 
+                 "betas": (0.9, 0.999), # momentum and scaling for ADAM, 
+                 "lrDecay": 0.99, 
+                 "beta": 1, 
+                 "gamma": 1, 
+                 "nll": True,
+                 "evd": False,
+                 "nf": False
             }
   
 if MODELNAME in ("RPPlaplaceGaussian"):
   TRAINCONFIG = {"learningRate": 0.001, 
-            "weightDecay": 0.0001,
-            "epochs": 24, 
-            "batchSize": 16, 
-          "optimizer": "adam", 
-            "device": "cuda", 
-            "betas": (0.9, 0.999), # momentum and scaling for ADAM, 
-            "lrDecay": 0.99, 
-          "beta": 1, 
-          "gamma": 5, 
-            "nll": True,
-          "evd": False,
-            "nf": False
+                 "weightDecay": 0.0001,
+                 "epochs": 24, 
+                 "batchSize": 16, 
+                 "optimizer": "adam", 
+                 "device": "cuda", 
+                 "betas": (0.9, 0.999), # momentum and scaling for ADAM, 
+                 "lrDecay": 0.99, 
+                 "beta": 1, 
+                 "gamma": 5, 
+                 "nll": True,
+                 "evd": False,
+                 "nf": False
+            }
+  
+if MODELNAME in ("RPPgaussianLaplace"):
+  TRAINCONFIG = {"learningRate": 0.001, 
+                 "weightDecay": 0.0001,
+                 "epochs": 24, 
+                 "batchSize": 16, 
+                 "optimizer": "adam", 
+                 "device": "cuda", 
+                 "betas": (0.9, 0.999), # momentum and scaling for ADAM, 
+                 "lrDecay": 0.99, 
+                 "beta": 20, 
+                 "gamma": 5, 
+                 "nll": True,
+                 "evd": False,
+                 "nf": False
             }
 
         
@@ -110,3 +126,8 @@ PATHORIGIN = None
 MODELPATH = os.path.join(PATHORIGIN, "models")
 PATHRAW = None
 HPECKPT = os.path.join(PATHORIGIN, "trainedModels", "humanPoseEstimation")
+
+
+
+
+
