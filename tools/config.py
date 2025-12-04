@@ -20,7 +20,8 @@ if MODELNAME in ("RPPgaussianGaussian", "RPPgaussianGaussianCov"):
                   "gamma": 5,  
                   "nll": True,
                   "evd": False,
-                  "nf": False
+                  "nf": False,
+                  "testing_epoch": None  # Set to specific epoch number or None for latest
             }
 
 if MODELNAME in ("RPPlaplaceLaplace"):
@@ -36,7 +37,8 @@ if MODELNAME in ("RPPlaplaceLaplace"):
                  "gamma": 1, 
                  "nll": True,
                  "evd": False,
-                 "nf": False
+                 "nf": False,
+                 "testing_epoch": None  # Set to specific epoch number or None for latest
             }
   
 if MODELNAME in ("RPPlaplaceGaussian"):
@@ -52,7 +54,8 @@ if MODELNAME in ("RPPlaplaceGaussian"):
                  "gamma": 5, 
                  "nll": True,
                  "evd": False,
-                 "nf": False
+                 "nf": False,
+                 "testing_epoch": None  # Set to specific epoch number or None for latest
             }
   
 if MODELNAME in ("RPPgaussianLaplace"):
@@ -68,7 +71,8 @@ if MODELNAME in ("RPPgaussianLaplace"):
                  "gamma": 5, 
                  "nll": True,
                  "evd": False,
-                 "nf": False
+                 "nf": False,
+                 "testing_epoch": None  # Set to specific epoch number or None for latest
             }
 
         
@@ -84,7 +88,8 @@ if MODELNAME in ("RPPevidential"):
             "lambda":0.001, # 0.001
             "nll": False,
             "evd": True,
-            "nf": False
+            "nf": False,
+            "testing_epoch": None  # Set to specific epoch number or None for latest
             }
 
 
@@ -101,7 +106,8 @@ if MODELNAME in ("RPPnormalizingFlow"):
             "beta": 1,
             "nll": False,
             "evd": False, 
-            "nf": True
+            "nf": True,
+            "testing_epoch": None  # Set to specific epoch number or None for latest
             }
 
 if MODELNAME in ("HoEtAlBaseline"):
@@ -116,13 +122,14 @@ if MODELNAME in ("HoEtAlBaseline"):
             "nll": False,
             "evd": False,
             "nf": False, 
-            "HR_SINGLE": True
+            "HR_SINGLE": True,
+            "testing_epoch": None  # Set to specific epoch number or None for latest
             }
 
 
 
 # paths
-PATHORIGIN = None  # Set this to your data root path
+PATHORIGIN = None  # Set this to your root path
 PATHRAW = None  # Set this to your raw radar data path
 
 # Validate paths before using them

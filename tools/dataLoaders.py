@@ -48,7 +48,8 @@ class RadarData(Dataset):
                  trainMode: str, 
                  rootPath: str,
                  trainDataPath: str, 
-                 seqLen: int):
+                 seqLen: int,
+                 single_frame: bool = False):
         """
         Initializes the RadarData dataset class for loading horizontal and vertical radar data.
 
@@ -57,13 +58,21 @@ class RadarData(Dataset):
             rootPath (str): Root path where the radar and skeleton data are stored.
             trainDataPath (str): Path to the specific training data files.
             seqLen (int): Length of the sequence to be loaded for training or validation.
+            single_frame (bool): If True, load single frames instead of sequences (for HRRadarPose).
 
         """
         # genral 
         self.seqLen = seqLen
+        self.single_frame = single_frame
         self.mode = trainMode
         self.rootPath = rootPath
         self.trainPath = trainDataPath
+        
+        # Use different subdirectory based on data format
+        if single_frame:
+            self.dataMode = "single_frame"
+        else:
+            self.dataMode = f"seq_{seqLen}"
 
         # augmentation
         self.augment = False
@@ -76,9 +85,9 @@ class RadarData(Dataset):
         ]  # List of available augmentations
         
         if self.mode == "train": 
-            self.participants = ["p3", 'p4', "p3" 'p5', 'p6', 'p7', 'p8', "p9", 'p10', "p11"] #['p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10', "p11"]
+            self.participants = ["p3"] #, 'p4', "p3" 'p5', 'p6', 'p7', 'p8', "p9", 'p10', "p11"] 
             self.angles = ["an0", "an1" , "an2"]
-            self.actions = ["ac1", "ac2", "ac3","ac4","ac5","ac6","ac7","ac8", "ac9"]#, "ac10", "ac11"]#, "ac10", "ac11"]#, "ac10","ac11"]  #["ac0", "ac1" "ac2", "ac3","ac4","ac5","ac6","ac7","ac8","ac9","ac10","ac11"] 
+            self.actions = ["ac1", "ac2", "ac3","ac4","ac5","ac6","ac7","ac8", "ac9"]
             self.recording = ["r0", "r1"]
 
              
@@ -86,14 +95,14 @@ class RadarData(Dataset):
         if self.mode == "val":
             self.participants = ["p12"]
             self.angles = ["an0", "an1", "an2"]
-            self.actions = ["ac1", "ac2", "ac3","ac4","ac5","ac6","ac7","ac8","ac9"] #, "ac10", "ac11"] #, "ac10", "ac11"]#, "ac10","ac11"] #["ac0", "ac1", "ac2", "ac3","ac4","ac5","ac6","ac7","ac8","ac9", "ac10","ac11"]
+            self.actions = ["ac1", "ac2", "ac3","ac4","ac5","ac6","ac7","ac8","ac9"] 
             self.recording = ["r0", "r1"]
             
             
         if self.mode == "test":
-            self.participants = ["p1", "p2", "p12"] # 1, 2, 12
-            self.angles = ["an0"] #, "an1", "an2"]
-            self.actions = ["ac0","ac1","ac2","ac3","ac4","ac5","ac6","ac7","ac8","ac9"] #,"ac10","ac11"]
+            self.participants = ["p1", "p2", "p12"] 
+            self.angles = ["an0", "an1", "an2"]
+            self.actions = ["ac0","ac1","ac2","ac3","ac4","ac5","ac6","ac7","ac8","ac9"] 
             self.recording = ["r0", "r1"]
             
     
@@ -111,7 +120,8 @@ class RadarData(Dataset):
         random.shuffle(trials)
         self.trials = trials 
         
-        if not os.path.exists(os.path.join(self.trainPath, self.mode)):
+        data_dir = os.path.join(self.trainPath, self.mode, self.dataMode)
+        if not os.path.exists(data_dir):
             # generate trainData
             counter = 0
             for i in tqdm(range(len(self.trials))):
@@ -131,47 +141,62 @@ class RadarData(Dataset):
                     dataTarget = np.load(pathTarget)
                     dataTarget = dataTarget.reshape(dataTarget.shape[0], 26, 3)
                     
-                    
-                    for b in range(radar.shape[0]- self.seqLen): # <--  use for overlapping sequences
-                    #for b in range(0, radar.shape[0] - self.seqLen, int(self.seqLen/2)):
-                        radarOut = radar[b:b + self.seqLen]
-                        #radarOut = radar[b]
-                        radarTorch = torch.from_numpy(radarOut)
-                        radarTorch = radarTorch.to(torch.complex64)
-                        #radarTorch = preProcess(radarTorch)
-                        
-                        # save radar
-                        os.makedirs(os.path.join(self.trainPath, self.mode, "radar"), exist_ok=True)
-                        os.makedirs(os.path.join(self.trainPath, self.mode, "target"), exist_ok= True)
-                        torch.save(radarTorch, os.path.join(self.trainPath, self.mode, "radar", str(counter) + ".pth"))
-                        
-                        # save target
-                        # get gt
-                        gt = torch.from_numpy(dataTarget[b + self.seqLen])
-                        #gt = torch.from_numpy(dataTarget[b])
-                        torch.save(gt, os.path.join(self.trainPath, self.mode, "target", str(counter) + ".pth"))
+                    if self.single_frame:
+                        # Single frame mode: process each frame individually
+                        for b in range(radar.shape[0]):
+                            radarOut = radar[b]
+                            radarTorch = torch.from_numpy(radarOut)
+                            radarTorch = radarTorch.to(torch.complex64)
+                            
+                            # save radar
+                            os.makedirs(os.path.join(data_dir, "radar"), exist_ok=True)
+                            os.makedirs(os.path.join(data_dir, "target"), exist_ok=True)
+                            torch.save(radarTorch, os.path.join(data_dir, "radar", str(counter) + ".pth"))
+                            
+                            # save target
+                            gt = torch.from_numpy(dataTarget[b])
+                            torch.save(gt, os.path.join(data_dir, "target", str(counter) + ".pth"))
+                            
+                            counter += 1
+                            
+                            if counter % 200 == 0:
+                                print("created ", counter, " frames")
+                    else:
+                        # Sequence mode: original logic
+                        for b in range(radar.shape[0]- self.seqLen): # <--  use for overlapping sequences
+                        #for b in range(0, radar.shape[0] - self.seqLen, int(self.seqLen/2)):
+                            radarOut = radar[b:b + self.seqLen]
+                            radarTorch = torch.from_numpy(radarOut)
+                            radarTorch = radarTorch.to(torch.complex64)
+                            
+                            # save radar
+                            os.makedirs(os.path.join(data_dir, "radar"), exist_ok=True)
+                            os.makedirs(os.path.join(data_dir, "target"), exist_ok=True)
+                            torch.save(radarTorch, os.path.join(data_dir, "radar", str(counter) + ".pth"))
+                            
+                            # save target
+                            gt = torch.from_numpy(dataTarget[b + self.seqLen])
+                            torch.save(gt, os.path.join(data_dir, "target", str(counter) + ".pth"))
 
-
-                        counter += 1
-                        
-                        ## print
-                        if counter % 200 == 0:
-                            print("created ", counter, " sequences")
+                            counter += 1
+                            
+                            if counter % 200 == 0:
+                                print("created ", counter, " sequences")
                 else: 
                     pass
             
             print("data generated!")
             self.counter = counter
         else:
-            self.counter = len(os.listdir(os.path.join(self.trainPath, self.mode, "radar")))
+            self.counter = len(os.listdir(os.path.join(data_dir, "radar")))
         
         # load gt 
         if self.mode == "train":
             # load gt into ram 
-            self.gt = self.load_directory_into_ram(os.path.join(self.trainPath, "train", "target"))
+            self.gt = self.load_directory_into_ram(os.path.join(self.trainPath, "train", self.dataMode, "target"))
         
         if self.mode == "val":
-            self.gt = self.load_directory_into_ram(os.path.join(self.trainPath, "val", "target"))
+            self.gt = self.load_directory_into_ram(os.path.join(self.trainPath, "val", self.dataMode, "target"))
 
                            
     def __len__(self):
@@ -245,7 +270,7 @@ class RadarData(Dataset):
         """
         
         # get radar 
-        radar = torch.load(os.path.join(os.path.join(self.rootPath, self.mode, "radar", str(idx) + ".pth")), weights_only=True)
+        radar = torch.load(os.path.join(os.path.join(self.rootPath, self.mode, self.dataMode, "radar", str(idx) + ".pth")), weights_only=True)
 
 
         # Apply augmentation only with probability `augment_prob`

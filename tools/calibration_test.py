@@ -59,7 +59,8 @@ def main():
         visualizer.quantify_improvement_with_holdout(
             mu_val, var_val, gt_val,
             mu_test, var_test, gt_test,
-            laplace_=config["laplace"]
+            laplace_=config["laplace"],
+            model_name=model_suffix
         )
     else:
         if ensemble_val is None or ensemble_test is None:
@@ -68,7 +69,8 @@ def main():
         visualizer = EmpiricalVisualizer(num_dims=78)
         visualizer.quantify_improvement_with_holdout(
             mu_val, var_val, gt_val, ensemble_val,
-            mu_test, var_test, gt_test, ensemble_test
+            mu_test, var_test, gt_test, ensemble_test,
+            model_name=model_suffix
         )
 
 if __name__ == "__main__":

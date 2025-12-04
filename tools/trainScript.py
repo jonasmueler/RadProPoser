@@ -19,9 +19,9 @@ elif MODELNAME in ("RPPgaussianGaussianCov"):
 elif MODELNAME in ("RPPevidential"):
     from evidential_pose_regression import RadProPoserEvidential as Encoder
 elif MODELNAME in ("RPPnormalizingFlow"):
-    from normalizing_flow import RadProPoserVAE as Encoder
+    from normalizing_flow import RadProPoserVAENF as Encoder
 elif MODELNAME in ("HoEtAlBaseline"):
-    from models import HRRadarPose as Encoder
+    from vae_lstm_ho import HRRadarPose as Encoder
 else:
     raise ValueError(f"Invalid MODELNAME: {MODELNAME}. Check config.py for valid model names.")
 
@@ -94,10 +94,11 @@ print(f"Non-trainable parameters: {nonTrainableParams}")
 
 
 # get dataLoaders 
-datasetTrain = dataLoaders.RadarData("train", PATHRAW, PATHRAW, SEQLEN)
+single_frame_mode = TRAINCONFIG.get("HR_SINGLE", False)
+datasetTrain = dataLoaders.RadarData("train", PATHRAW, PATHRAW, SEQLEN, single_frame=single_frame_mode)
 dataTrain = DataLoader(datasetTrain, TRAINCONFIG["batchSize"], shuffle = True, num_workers = 1)
 
-datasetVal = dataLoaders.RadarData("val", PATHRAW, PATHRAW,  SEQLEN)
+datasetVal = dataLoaders.RadarData("val", PATHRAW, PATHRAW, SEQLEN, single_frame=single_frame_mode)
 dataVal = DataLoader(datasetVal, TRAINCONFIG["batchSize"], shuffle = True, num_workers = 1)
 
 

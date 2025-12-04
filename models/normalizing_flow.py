@@ -5,7 +5,6 @@ from hrnet3D_config import *
 from hrnet3D_config_4D import MODEL_CONFIGS as cfg_4D
 from yacs.config import CfgNode as CN
 import torch
-from edl_pytorch import NormalInvGamma
 import normflows as nf
 from normflows.flows import Planar, Radial, MaskedAffineFlow, BatchNorm
 from normflows import nets
@@ -590,7 +589,7 @@ class RadProPoserVAENF(nn.Module):
     
 if __name__ == "__main__":
     # radproposer
-    model = RadProPoserVAE().float().cuda()
+    model = RadProPoserVAENF().float().cuda()
     
     testData = torch.rand(10, 8, 4, 4, 64, 128).cuda()
 

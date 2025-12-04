@@ -39,7 +39,7 @@ To get started with the project, follow the steps below:
 
 2. **Install torch with cuda_12.4**:
    ```bash
-   pip3 install torch torchvision torchaudio
+   pip install torch torchvision torchaudio
    ```
 
 3. **Install additional dependencies**:

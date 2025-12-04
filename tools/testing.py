@@ -8,11 +8,66 @@ import sys
 from config import *
 import trainLoop
 
+def get_model_checkpoint_path(model_name: str, testing_epoch: int = None) -> str:
+    """
+    Get the path to the model checkpoint for testing.
+    
+    Args:
+        model_name: Name of the model (e.g., "RPPgaussianGaussianCov")
+        testing_epoch: Specific epoch number to use, or None to use the latest checkpoint
+    
+    Returns:
+        Full path to the checkpoint file
+    """
+    model_dir = os.path.join(PATHORIGIN, "trainedModels", model_name)
+    
+    if testing_epoch is not None:
+        # Use specified epoch
+        checkpoint_name = f"{model_name}{testing_epoch}"
+        checkpoint_path = os.path.join(model_dir, checkpoint_name)
+        if not os.path.exists(checkpoint_path):
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+        return checkpoint_path
+    else:
+        # Find latest checkpoint
+        if not os.path.exists(model_dir):
+            raise FileNotFoundError(f"Model directory not found: {model_dir}")
+        
+        # List all files in the directory that start with model_name
+        checkpoint_files = [
+            f for f in os.listdir(model_dir) 
+            if f.startswith(model_name) and os.path.isfile(os.path.join(model_dir, f))
+        ]
+        
+        if not checkpoint_files:
+            raise FileNotFoundError(f"No checkpoints found in {model_dir}")
+        
+        # Extract epoch numbers and find the maximum
+        epochs = []
+        for f in checkpoint_files:
+            # Remove model_name prefix to get epoch number
+            suffix = f[len(model_name):]
+            try:
+                epoch = int(suffix)
+                epochs.append((epoch, f))
+            except ValueError:
+                continue
+        
+        if not epochs:
+            raise ValueError(f"Could not parse epoch numbers from checkpoints in {model_dir}")
+        
+        # Get the checkpoint with the highest epoch number
+        latest_epoch, latest_file = max(epochs, key=lambda x: x[0])
+        checkpoint_path = os.path.join(model_dir, latest_file)
+        print(f"Using latest checkpoint: {latest_file} (epoch {latest_epoch})")
+        return checkpoint_path
+
 class RadarPoseTester:
-    def __init__(self, root_path: str, seq_len: int = SEQLEN, device: str = TRAINCONFIG["device"]):
+    def __init__(self, root_path: str, seq_len: int = SEQLEN, device: str = TRAINCONFIG["device"], single_frame: bool = False):
         self.root_path = root_path
         self.seq_len = seq_len
         self.device = device
+        self.single_frame = single_frame
 
     @staticmethod
     def compute_mpjpe(preds: torch.Tensor, targets: torch.Tensor, keypoints: bool = False):
@@ -109,9 +164,20 @@ class RadarPoseTester:
 
         self.model.eval()
         with torch.no_grad():
-            for i in tqdm(range(0, radar.size(0) - self.seq_len, batch_size), desc=f"Predicting {'_'.join(combination)}"):
-                end = min(i + batch_size, radar.size(0) - self.seq_len)
-                batch = torch.stack([radar[j:j+self.seq_len] for j in range(i, end)])
+            if self.single_frame:
+                # Single frame mode: process each frame individually
+                loop_range = range(0, radar.size(0), batch_size)
+            else:
+                # Sequence mode: original logic
+                loop_range = range(0, radar.size(0) - self.seq_len, batch_size)
+            
+            for i in tqdm(loop_range, desc=f"Predicting {'_'.join(combination)}"):
+                if self.single_frame:
+                    end = min(i + batch_size, radar.size(0))
+                    batch = radar[i:end]
+                else:
+                    end = min(i + batch_size, radar.size(0) - self.seq_len)
+                    batch = torch.stack([radar[j:j+self.seq_len] for j in range(i, end)])
                 
                 if MODELNAME in ("RPPgaussianGaussian", "RPPlaplaceLaplace", "RPPlaplaceGaussian", "RPPgaussianLaplace"):
                     ensemble, _, _, mu, var = self.model(batch, return_samples=True)
@@ -142,7 +208,10 @@ class RadarPoseTester:
 
         preds = torch.cat(preds, dim=0)
         vars = torch.cat(vars, dim=0)
-        gts = target[self.seq_len:].reshape(-1, 26 * 3).to(self.device)
+        if self.single_frame:
+            gts = target.reshape(-1, 26 * 3).to(self.device)
+        else:
+            gts = target[self.seq_len:].reshape(-1, 26 * 3).to(self.device)
         
         if ensembles:
             ensembles = torch.cat(ensembles, dim=0)
@@ -245,11 +314,11 @@ class RadarPoseTester:
         elif MODELNAME == "RPPevidential":
             from evidential_pose_regression import RadProPoserEvidential as Encoder
         elif MODELNAME == "RPPnormalizingFlow":
-            from normalizing_flow import RadProPoserVAE as Encoder
+            from normalizing_flow import RadProPoserVAENF as Encoder
         elif MODELNAME == "HoEtAlBaseline":
             from vae_lstm_ho import HRRadarPose as Encoder
         else:
-            from vae_lstm_ho import CNN_LSTM as Encoder
+            raise ValueError(f"Invalid MODELNAME: {MODELNAME}. Check config.py for valid model names.")
 
         self.model = Encoder().to(self.device)
         self.model = trainLoop.loadCheckpoint(self.model, None, model_path)
@@ -321,14 +390,19 @@ class RadarPoseTester:
         return results_by_participant
 
 if __name__ == "__main__":
-    tester = RadarPoseTester(root_path=PATHRAW)
+    single_frame_mode = TRAINCONFIG.get("HR_SINGLE", False)
+    tester = RadarPoseTester(root_path=PATHRAW, single_frame=single_frame_mode)
+
+    # Get checkpoint path based on testing_epoch setting
+    testing_epoch = TRAINCONFIG.get("testing_epoch", None)
+    model_path = get_model_checkpoint_path(MODELNAME, testing_epoch)
 
     res = tester.run_evaluation(
         parts=["p1", "p2", "p12"],
         angles=["an0", "an1", "an2"],
         actions=["ac1", "ac2", "ac3", "ac4", "ac5", "ac6", "ac7", "ac8", "ac9"],
         reps=["r0", "r1"],
-        model_path=os.path.join(HPECKPT, MODELNAME)
+        model_path=model_path
     )
 
     print(res)

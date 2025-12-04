@@ -30,26 +30,34 @@ class MultiModelRecalibrationVisualizer:
             "isotonic": [IsotonicRegression(out_of_bounds="clip") for _ in range(num_dims)],
         }
 
-    def save_models(self, directory: str):
+    def save_models(self, directory: str, model_name: str):
         """
         Serialize each model-type's list of per-dimension regressors
-        to disk under `directory/`, one .pkl per model-type.
+        to disk under `directory/{model_name}/`, one .pkl per model-type.
+        
+        Args:
+            directory: Base directory name (e.g., "recalibration_models")
+            model_name: Name of the pose estimation model (e.g., "rppgaussiangaussiancov")
         """
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        full_path = os.path.join(base_dir, directory)
+        full_path = os.path.join(base_dir, directory, model_name)
         os.makedirs(full_path, exist_ok=True)
         for model_type, mdl_list in self.models.items():
             path = os.path.join(full_path, f"{model_type}.pkl")
             joblib.dump(mdl_list, path)
-        print(f"Saved {len(self.models)} model types to '{directory}'")
+        print(f"Saved {len(self.models)} model types to '{directory}/{model_name}'")
 
-    def load_models(self, directory: str):
+    def load_models(self, directory: str, model_name: str):
         """
-        Load each model-type's .pkl file from `directory/` back into self.models.
+        Load each model-type's .pkl file from `directory/{model_name}/` back into self.models.
         Expects files like `isotonic.pkl`, `rf100.pkl`, etc.
+        
+        Args:
+            directory: Base directory name (e.g., "recalibration_models")
+            model_name: Name of the pose estimation model (e.g., "rppgaussiangaussiancov")
         """
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        full_path = os.path.join(base_dir, directory)
+        full_path = os.path.join(base_dir, directory, model_name)
         for model_type in list(self.models.keys()):
             path = os.path.join(full_path, f"{model_type}.pkl")
             if not os.path.isfile(path):
@@ -292,19 +300,21 @@ class MultiModelRecalibrationVisualizer:
     def quantify_improvement_with_holdout(
         self,
         mu_train: np.ndarray, var_train: np.ndarray, gt_train: np.ndarray, cdf_train:np.ndarray,
-        mu_test: np.ndarray, var_test: np.ndarray, gt_test: np.ndarray, cdf_test:np.ndarray
+        mu_test: np.ndarray, var_test: np.ndarray, gt_test: np.ndarray, cdf_test:np.ndarray,
+        model_name: str = None
     ):
         """Fit on train set, report calibration error and per-dimension sharpness on test set."""
         self._fit_models(gt_train, cdf_train)
-        self.save_models("calibrated_models")
+        if model_name is None:
+            raise ValueError("model_name must be provided to save recalibration models")
+        self.save_models("recalibration_models", model_name)
 
         # --- Uncalibrated ---
         cdf_uncal = self._get_cdf_at_y(cdf_test, gt_test)
         unc_error = self._compute_calibration_error(cdf_uncal)
-        #unc_sharpness_vec = np.mean(np.sqrt(var_test))  # per-dim average σ²
         unc_sharpness_vec = np.mean(np.sum(var_test.reshape(var_test.shape[0], 26, 3), axis = -1))  # per-dim average σ
-        unc_sharpness_vec_keys = np.sum(np.mean(var_test.reshape(var_test.shape[0], 26, 3), axis = 0), axis = -1)
-        print(f"Calibration Error (Uncalibrated per key) ", unc_sharpness_vec_keys)
+        unc_sharpness_vec_keys = np.mean(np.sum(var_test.reshape(var_test.shape[0], 26, 3), -1), axis = 0)
+        print(f"sharpness uncalibrated per keypoint", unc_sharpness_vec_keys)
         print(f"Calibration Error (Uncalibrated): {unc_error:.6f}")
         print(f"Sharpness (Uncalibrated): {unc_sharpness_vec}")
 
@@ -331,11 +341,12 @@ class MultiModelRecalibrationVisualizer:
                         )#self._estimate_variance_from_isotonic(model, y_support)
                     sharpness_vals.append(var_d)
                 sharpness_vec = np.stack(sharpness_vals, axis=0)
-                print(f"Sharpness Vector (Recalibrated - {model_type}):")
+                print(f"Sharpness Vector (Recalibrated - {model_type}) per keypoint:")
                 #print(np.sqrt(sharpness_vec))
                 print(np.sum(sharpness_vec.reshape( 26,3), axis = -1))
                 
                 #print("mean ", np.mean(np.sqrt(sharpness_vec)))
+                print("Sharpness Calibrated: ")
                 print(np.mean(np.sum(sharpness_vec.reshape(26,3), axis = -1)))
 
             else:

@@ -7,7 +7,6 @@ from config import *
 import torch.optim as optim
 import torch.nn.functional as F
 from edl_pytorch import evidential_regression
-from calibration_sharpness import *
 from torch.optim.lr_scheduler import SequentialLR, LambdaLR
 
 
@@ -44,14 +43,16 @@ def saveCheckpoint(model: nn.Module,
     Args:
         model (nn.Module): The model whose state needs to be saved.
         optimizer (torch.optim.Optimizer): The optimizer whose state needs to be saved.
-        filename (str): The name of the file to save the checkpoint to.
+        filename (str): The name of the file to save the checkpoint to (relative to PATHORIGIN).
 
     """
-
+    filepath = os.path.join(PATHORIGIN, filename)
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    
     checkpoint = {
         'model': model.state_dict(),
         'optimizer': optimizer.state_dict()}
-    torch.save(checkpoint, os.path.join(PATHORIGIN, filename))
+    torch.save(checkpoint, filepath)
     print("checkpoint saved")
     return
 
@@ -276,7 +277,8 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
     if loadModel:
         # get into folder
         os.chdir(os.path.join(PATHORIGIN, "models"))
-        lastState = loadCheckpoint(model, optimizer, os.path.join(PATHORIGIN, "trainedModels", modelName))
+        checkpoint_path = os.path.join(PATHORIGIN, "trainedModels", modelName, modelName)
+        lastState = loadCheckpoint(model, optimizer, checkpoint_path)
         model = lastState[0]
         optimizer = lastState[1]
 
@@ -328,7 +330,7 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                     loss = criterion(mu, gt) +  TRAINCONFIG["beta"] * kld
             
             elif TRAINCONFIG["evd"] == True:
-                pred_nig = model(radar)
+                pred_nig, _ = model(radar)
 
                 loss = evidential_regression(
                         pred_nig,      # predicted Normal Inverse Gamma parameters
@@ -399,10 +401,10 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
                     _, _, _, preds, _ = model.forward(x)
                 
                 elif TRAINCONFIG["nf"] == True:
-                    preds = model.forward(x, inference = True)
+                    preds,_,_ = model.forward(x, inference = True)
 
                 elif TRAINCONFIG["evd"] == True:
-                    preds = model(x) # (mu, v, alpha, beta)
+                    preds, _ = model(x) # (mu, v, alpha, beta)
                     preds = preds[0]
                     
                 elif TRAINCONFIG["HR_SINGLE"] == True:
@@ -430,12 +432,12 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
             print("valLoss: ", valLosses.detach().cpu().item())
 
             # save model and optimizer checkpoint
-            path = os.path.join(HPECKPT)
-            os.chdir(path)
-            saveCheckpoint(model, optimizer, os.path.join(path, modelName + str(b)))
+            checkpoint_path = os.path.join("trainedModels", modelName, modelName + str(b))
+            saveCheckpoint(model, optimizer, checkpoint_path)
 
     ## save model state
-    saveCheckpoint(model, optimizer, os.path.join(PATHORIGIN, "trainedModels", modelName + str(b)))
+    final_checkpoint_path = os.path.join("trainedModels", modelName, modelName + str(b))
+    saveCheckpoint(model, optimizer, final_checkpoint_path)
     print("Model saved!")
     print("Training done!")
 
