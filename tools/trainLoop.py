@@ -301,14 +301,14 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
 
             # loss functions
             if TRAINCONFIG["nll"] == True:
-                preds, mu, logVar, muOut, varOut = model.forward(radar) #varOut can also be covariance
+                preds, mu, latentSpread, muOut, varOut = model.forward(radar) # varOut can also be covariance, laplacian latent has no kl term
 
                 # check for different likelihoods 
                 if MODELNAME in ("RPPgaussianGaussian"):
-                    KLloss = KLLoss(mu, logVar) 
+                    KLloss = KLLoss(mu, latentSpread) 
                     nLL, pen = nllLoss(gt, muOut, varOut)
                 elif MODELNAME in ("RPPgaussianGaussianCov"):
-                     KLloss = KLLoss(mu, logVar)
+                     KLloss = KLLoss(mu, latentSpread)
                      nLL, pen = nll_from_cov(gt, muOut, varOut)
                 
                 elif MODELNAME in ("RPPlaplaceGaussian"): #laplace latent has no KL div term
@@ -317,7 +317,7 @@ def trainLoop(trainLoader: torch.utils.data.DataLoader,
 
                 elif MODELNAME in ("RPPgaussianLaplace"): 
                      nLL, pen = laplace_nll(gt, muOut, varOut)
-                     KLloss = KLLoss(mu, logVar)
+                     KLloss = KLLoss(mu, latentSpread)
 
                 elif MODELNAME in ("RPPlaplaceLaplace"):
                     nLL, pen = laplace_nll(gt, muOut, varOut)

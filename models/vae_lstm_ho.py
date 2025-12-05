@@ -451,7 +451,7 @@ class RadProPoserVAE(nn.Module):
         
         # latent space 
         self.mu = nn.Sequential(nn.Linear(2048, 256))
-        self.sigma = nn.Sequential(nn.Linear(2048, 256))
+        self.spread = nn.Sequential(nn.Linear(2048, 256))
         self.varianceScaling = nn.Parameter(torch.tensor(0.1))
         self.Nsamples = 500
 
@@ -524,11 +524,11 @@ class RadProPoserVAE(nn.Module):
     
     def sampleLatent(self, 
                      mu: torch.Tensor, 
-                     sigma: torch.Tensor, 
+                     logvar: torch.Tensor, 
                      alpha: float = None)->torch.Tensor:
         if alpha != None:
             self.varianceScaling = torch.tensor(alpha)
-        out = self.sample(mu, sigma)
+        out = self.sample(mu, logvar)
         return out
     
     def getLatent(self, x: torch.Tensor)-> tuple[torch.Tensor, torch.Tensor]:
@@ -549,9 +549,9 @@ class RadProPoserVAE(nn.Module):
 
         # get latent 
         mu = self.mu(spatiotemp)
-        sigma = self.sigma(spatiotemp)
+        logvar = self.spread(spatiotemp)
         
-        return mu, sigma
+        return mu, logvar
     
     def forward(self, 
                 x: torch.Tensor, 
@@ -574,23 +574,34 @@ class RadProPoserVAE(nn.Module):
 
         # get latent 
         mu = self.mu(spatiotemp)
-        sigma = self.sigma(spatiotemp)
 
         if self.latent_dist == "laplace":
-            samples = self.decoder(torch.stack([self.sample_laplace(mu, sigma) for i in range(self.Nsamples)], dim = 1))
+            b_latent = self.spread(spatiotemp)
+            samples = self.decoder(torch.stack([self.sample_laplace(mu, b_latent) for i in range(self.Nsamples)], dim = 1))
+            
+            muOut = torch.mean(samples, dim = 1)
+            varOut = torch.var(samples, dim = 1)
+
+            samples = samples.permute(0, 2, 1)
+
+            if return_samples:
+                return samples, mu, b_latent, muOut, varOut
+            else: 
+                return None, mu, b_latent, muOut, varOut
 
         else: # gaussian
-            samples = self.decoder(torch.stack([self.sample(mu, sigma, device = device) for i in range(self.Nsamples)], dim = 1))
+            logvar = self.spread(spatiotemp)
+            samples = self.decoder(torch.stack([self.sample(mu, logvar, device = device) for i in range(self.Nsamples)], dim = 1))
         
-        muOut = torch.mean(samples, dim = 1)
-        varOut = torch.var(samples, dim = 1)
+            muOut = torch.mean(samples, dim = 1)
+            varOut = torch.var(samples, dim = 1)
 
-        samples = samples.permute(0, 2, 1)
+            samples = samples.permute(0, 2, 1)
 
-        if return_samples:
-            return samples, mu, sigma, muOut, varOut
-        else: 
-            return None, mu, sigma, muOut, varOut
+            if return_samples:
+                return samples, mu, logvar, muOut, varOut
+            else: 
+                return None, mu, logvar, muOut, varOut
 
 class RadProPoserVAECov(nn.Module):
     def __init__(self):
@@ -617,7 +628,7 @@ class RadProPoserVAECov(nn.Module):
         
         # latent space 
         self.mu = nn.Sequential(nn.Linear(2048, 256))
-        self.sigma = nn.Sequential(nn.Linear(2048, 256))
+        self.spread = nn.Sequential(nn.Linear(2048, 256))
         self.varianceScaling = nn.Parameter(torch.tensor(0.1))
         self.Nsamples = 500
         self.latent_dist = "gaussian"
@@ -659,11 +670,11 @@ class RadProPoserVAECov(nn.Module):
     
     def sampleLatent(self, 
                      mu: torch.Tensor, 
-                     sigma: torch.Tensor, 
+                     logvar: torch.Tensor, 
                      alpha: float = None)->torch.Tensor:
         if alpha != None:
             self.varianceScaling = torch.tensor(alpha)
-        out = self.sample(mu, sigma)
+        out = self.sample(mu, logvar)
         return out
     
     def ensemble_stats(self, preds: torch.Tensor):
@@ -714,9 +725,9 @@ class RadProPoserVAECov(nn.Module):
 
         # get latent 
         mu = self.mu(spatiotemp)
-        sigma = self.sigma(spatiotemp)
+        logvar = self.spread(spatiotemp)
         
-        return mu, sigma
+        return mu, logvar
     
     def forward(self, 
                 x: torch.Tensor, 
@@ -739,19 +750,19 @@ class RadProPoserVAECov(nn.Module):
 
         # get latent 
         mu = self.mu(spatiotemp)
-        sigma = self.sigma(spatiotemp)
+        logvar = self.spread(spatiotemp)
 
         
-        samples = self.decoder(torch.stack([self.sample(mu, sigma, device = device) for i in range(self.Nsamples)], dim = 1))
+        samples = self.decoder(torch.stack([self.sample(mu, logvar, device = device) for i in range(self.Nsamples)], dim = 1))
 
         samples = samples.permute(0, 2, 1)
 
         muOut, cov = self.ensemble_stats(samples)
 
         if return_samples:
-            return samples, mu, sigma, muOut, cov
+            return samples, mu, logvar, muOut, cov
         else: 
-            return None, mu, sigma, muOut, cov
+            return None, mu, logvar, muOut, cov
 
 
 class LSTMModel(nn.Module):
