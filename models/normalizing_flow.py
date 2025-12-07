@@ -582,6 +582,56 @@ class RadProPoserVAENF(nn.Module):
             
 
             return mu_out, var_out, decoded
+        
+    def forward_inference(self, 
+                      x: torch.Tensor,
+                      n_samples: int = 500):
+        """
+        Optimized forward for inference with batch_size=1.
+        - Batches all backbone calls into single forward pass
+        - Sampling already vectorized
+        """
+        # FFT layer
+        x = self.preProcess(x)
+        
+        # === Batched backbone: stack all channels into batch dim ===
+        real_part = x.real.squeeze(0)  # [C, H, W]
+        imag_part = x.imag.squeeze(0)  # [C, H, W]
+        stacked_input = torch.cat([real_part, imag_part], dim=0)  # [2*C, H, W]
+        
+        # Single backbone pass (2*C treated as batch)
+        spatFeat = self.applyBackbone(stacked_input.float())  # [2*C, feat_dim]
+        
+        # Reshape for transformer: [1, 2*C, feat_dim]
+        spatFeat = spatFeat.unsqueeze(0)
+        spatFeat = self.former(spatFeat)
+        spatiotemp = spatFeat.flatten(start_dim=1, end_dim=-1)
+        
+        # Latent distribution parameters
+        mu = self.mu(spatiotemp)  # [1, latent_dim]
+        logvar = self.sigma(spatiotemp)  # [1, latent_dim]
+        std = torch.exp(0.5 * logvar)
+        
+        # === Vectorized MC sampling ===
+        mu = mu.unsqueeze(1)      # [1, 1, D]
+        std = std.unsqueeze(1)    # [1, 1, D]
+        eps = torch.randn(mu.size(0), n_samples, mu.size(2), device=mu.device)  # [1, n_samples, D]
+        z0 = mu + eps * std       # [1, n_samples, D]
+        z0 = z0.view(-1, z0.size(-1))  # [n_samples, D]
+        
+        # Flow forward + decode (batched)
+        zK, _ = self.flows(z0)        # [n_samples, D]
+        decoded = self.decoder(zK)    # [n_samples, 78]
+        
+        # Reshape to original format
+        decoded = decoded.view(1, n_samples, -1)  # [1, n_samples, 78]
+        mu_out = decoded.mean(dim=1)              # [1, 78]
+        var_out = decoded.var(dim=1)              # [1, 78]
+        decoded = decoded.permute(0, 2, 1)        # [1, 78, n_samples]
+        
+        return mu_out, var_out, decoded
+        
+
                 
 
         
@@ -591,10 +641,10 @@ if __name__ == "__main__":
     # radproposer
     model = RadProPoserVAENF().float().cuda()
     
-    testData = torch.rand(10, 8, 4, 4, 64, 128).cuda()
+    testData = torch.rand(1, 8, 4, 4, 64, 128).cuda()
 
     
-    _, _, cdf = model.forward(testData, inference = True)
+    _, _, cdf = model.forward_inference(testData)
     print(cdf.size())
         
 

@@ -532,6 +532,33 @@ class RadProPoserEvidential(nn.Module):
         samples = self.sample_aleatoric_from_output(out_uncertainty)
 
         return out_uncertainty, samples.permute(0, 2, 1)
+    
+    def forward_inference(self, 
+                      x: torch.Tensor):
+        """
+        Optimized forward for inference with batch_size=1.
+        - Batches all backbone calls into single forward pass
+        """
+        # FFT layer
+        x = self.preProcess(x)
+        
+        # === Batched backbone: stack all channels into batch dim ===
+        real_part = x.real.squeeze(0)  # [C, H, W]
+        imag_part = x.imag.squeeze(0)  # [C, H, W]
+        stacked_input = torch.cat([real_part, imag_part], dim=0)  # [2*C, H, W]
+        
+        # Single backbone pass (2*C treated as batch)
+        spatFeat = self.applyBackbone(stacked_input.float())  # [2*C, feat_dim]
+        
+        # Reshape for transformer: [1, 2*C, feat_dim]
+        spatiotemp = spatFeat.unsqueeze(0)
+        spatiotemp = self.former(spatiotemp).flatten(start_dim=1, end_dim=-1)
+        
+        # Output uncertainty params + sampling (already optimized)
+        out_uncertainty = self.out_uncertainty(spatiotemp)
+        samples = self.sample_aleatoric_from_output(out_uncertainty)
+        
+        return out_uncertainty, samples.permute(0, 2, 1)
 
 
 
@@ -539,10 +566,10 @@ if __name__ == "__main__":
     # radproposer
     model = RadProPoserEvidential().float()
     
-    testData = torch.rand(10, 8, 4, 4, 64, 128)
-    out = model.forward(testData)
+    testData = torch.rand(1, 8, 4, 4, 64, 128)
+    out = model.forward_inference(testData)
     out = model(testData)
-    for i in out:
-        print(i.size())
+    
+    print(out[0][0].size())
 
 

@@ -602,6 +602,83 @@ class RadProPoserVAE(nn.Module):
                 return samples, mu, logvar, muOut, varOut
             else: 
                 return None, mu, logvar, muOut, varOut
+            
+    def forward_inference(self, 
+                      x: torch.Tensor,
+                      return_samples: bool = False):
+        """
+        Optimized forward for inference with batch_size=1.
+        - Batches all backbone calls into single forward pass
+        - Vectorized sampling + batched decoding in one pass
+        """
+        # FFT layer
+        x = self.preProcess(x)
+        device = x.device
+        
+        # === Batched backbone: stack all channels into batch dim ===
+        real_part = x.real.squeeze(0)  # [C, H, W]
+        imag_part = x.imag.squeeze(0)  # [C, H, W]
+        stacked_input = torch.cat([real_part, imag_part], dim=0)  # [2*C, H, W]
+        
+        # Single backbone pass (2*C treated as batch)
+        spatFeat = self.applyBackbone(stacked_input.float())  # [2*C, feat_dim]
+        
+        # Reshape for transformer: [1, 2*C, feat_dim]
+        spatiotemp = spatFeat.unsqueeze(0)
+        spatiotemp = self.former(spatiotemp).flatten(start_dim=1, end_dim=-1)
+        
+        # Latent distribution parameters
+        mu = self.mu(spatiotemp)  # [1, latent_dim]
+        spread_param = self.spread(spatiotemp)  # [1, latent_dim]
+        
+        # === Vectorized sampling + batched decoding ===
+        if self.latent_dist == "laplace":
+            b_latent = spread_param
+            # Expand to [N, latent_dim] for batched sampling
+            mu_exp = mu.expand(self.Nsamples, -1)
+            b_exp = b_latent.expand(self.Nsamples, -1)
+            
+            # Vectorized Laplace reparameterization
+            u = torch.rand_like(mu_exp)
+            z = mu_exp - b_exp * torch.sign(u - 0.5) * torch.log1p(-2 * torch.abs(u - 0.5))
+            
+            # Single decoder forward on batch of N samples
+            decoded = self.decoder(z)  # [N, output_dim]
+            
+            # Reshape to original format
+            samples = decoded.unsqueeze(0)  # [1, N, output_dim]
+            muOut = samples.mean(dim=1)
+            varOut = samples.var(dim=1)
+            samples = samples.permute(0, 2, 1)  # [1, output_dim, N]
+            
+            if return_samples:
+                return samples, mu, b_latent, muOut, varOut
+            else:
+                return None, mu, b_latent, muOut, varOut
+        
+        else:  # Gaussian
+            logvar = spread_param
+            std = torch.exp(0.5 * logvar)
+            
+            mu_exp = mu.expand(self.Nsamples, -1)
+            std_exp = std.expand(self.Nsamples, -1)
+            
+            # Vectorized reparameterization
+            eps = torch.randn_like(mu_exp)
+            z = mu_exp + std_exp * eps
+            
+            # Single decoder forward
+            decoded = self.decoder(z)  # [N, output_dim]
+            
+            samples = decoded.unsqueeze(0)
+            muOut = samples.mean(dim=1)
+            varOut = samples.var(dim=1)
+            samples = samples.permute(0, 2, 1)
+            
+            if return_samples:
+                return samples, mu, logvar, muOut, varOut
+            else:
+                return None, mu, logvar, muOut, varOut
 
 class RadProPoserVAECov(nn.Module):
     def __init__(self):
@@ -763,6 +840,59 @@ class RadProPoserVAECov(nn.Module):
             return samples, mu, logvar, muOut, cov
         else: 
             return None, mu, logvar, muOut, cov
+    
+    def forward_inference(self, 
+                      x: torch.Tensor,
+                      return_samples: bool = False):
+        """
+        Optimized forward for inference with batch_size=1.
+        - Batches all backbone calls into single forward pass
+        - Vectorized sampling + batched decoding in one pass
+        """
+        # FFT layer
+        x = self.preProcess(x)
+        device = x.device
+        
+        # === Batched backbone: stack all channels into batch dim ===
+        real_part = x.real.squeeze(0)  # [C, H, W]
+        imag_part = x.imag.squeeze(0)  # [C, H, W]
+        stacked_input = torch.cat([real_part, imag_part], dim=0)  # [2*C, H, W]
+        
+        # Single backbone pass (2*C treated as batch)
+        spatFeat = self.applyBackbone(stacked_input.float())  # [2*C, feat_dim]
+        
+        # Reshape for transformer: [1, 2*C, feat_dim]
+        spatiotemp = spatFeat.unsqueeze(0)
+        spatiotemp = self.former(spatiotemp).flatten(start_dim=1, end_dim=-1)
+        
+        # Latent distribution parameters
+        mu = self.mu(spatiotemp)  # [1, latent_dim]
+        logvar = self.spread(spatiotemp)  # [1, latent_dim]
+        
+        # === Vectorized sampling + batched decoding ===
+        std = torch.exp(0.5 * logvar)
+        
+        # Expand to [N, latent_dim] for batched sampling
+        mu_exp = mu.expand(self.Nsamples, -1)
+        std_exp = std.expand(self.Nsamples, -1)
+        
+        # Vectorized reparameterization
+        eps = torch.randn_like(mu_exp)
+        z = mu_exp + std_exp * eps
+        
+        # Single decoder forward on batch of N samples
+        decoded = self.decoder(z)  # [N, output_dim]
+        
+        # Reshape to original format: [1, output_dim, N]
+        samples = decoded.unsqueeze(0).permute(0, 2, 1)
+        
+        # Ensemble statistics (covariance)
+        muOut, cov = self.ensemble_stats(samples)
+        
+        if return_samples:
+            return samples, mu, logvar, muOut, cov
+        else:
+            return None, mu, logvar, muOut, cov
 
 
 class LSTMModel(nn.Module):
@@ -915,13 +1045,29 @@ class HRRadarPose(nn.Module):
 
         return root, offsets
     
+    def forward_inference(self, x: torch.Tensor):
+        """
+        Forward for inference with batch_size=1.
+        Note: This model already processes backbone in single pass 
+        (concat along channel dim rather than sequential loop).
+        """
+        x = self.preProcess(x)
+        x = torch.cat([x.real, x.imag], dim=1)  # [1, 2*C, H, W]
+        x = self.bottleNeck(self.applyBackbone(x))
+        x = x.reshape(x.shape[0], 26, 3)
+        root = x[:, 0]
+        offsets = x[:, 1:]
+        return root, offsets
+    
 if __name__ == "__main__":
     # radproposer
     model = RadProPoserVAE().float().cuda()
+    model_cov = RadProPoserVAECov().float().cuda()
     
-    testData = torch.rand(16, 8, 4, 4, 64, 128).cuda()
-    out = model.forward(testData)
-    
+    testData = torch.rand(1, 8, 4, 4, 64, 128).cuda()
+    out = model.forward_inference(testData)
+    print(out[1].size())
+    out = model_cov.forward_inference(testData)
     print(out[1].size())
 
     

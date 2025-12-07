@@ -2,7 +2,7 @@ import os
 
 ## globals
 SEQLEN = 8
-MODELNAME = "RPPgaussianGaussianCov" # set the name of the model you want to train  here
+MODELNAME = "RPPgaussianGaussian"#"RPPgaussianGaussianCov" # set the name of the model you want to train  here
 
 ############################################### HPE #######################################################################
 ## model paramas
@@ -129,8 +129,8 @@ if MODELNAME in ("HoEtAlBaseline"):
 
 
 # paths
-PATHORIGIN = None  # Set this to your root path
-PATHRAW = None  # Set this to your raw radar data path
+PATHORIGIN = "/home/jonas/code/RadProPoser"  # Set this to your root path
+PATHRAW = "/home/jonas/data/radar_raw_data"  # Set this to your raw radar data path
 
 # Validate paths before using them
 if PATHORIGIN is None:
