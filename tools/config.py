@@ -4,8 +4,7 @@ import os
 SEQLEN = 8
 MODELNAME = "RPPgaussianGaussian"#"RPPgaussianGaussianCov" # set the name of the model you want to train  here
 
-############################################### HPE #######################################################################
-## model paramas
+############################################### HPE ######################################################################
 
 if MODELNAME in ("RPPgaussianGaussian", "RPPgaussianGaussianCov"):
   TRAINCONFIG = {"learningRate": 0.001, 
@@ -129,8 +128,8 @@ if MODELNAME in ("HoEtAlBaseline"):
 
 
 # paths
-PATHORIGIN = "/home/jonas/code/RadProPoser"  # Set this to your root path
-PATHRAW = "/home/jonas/data/radar_raw_data"  # Set this to your raw radar data path
+PATHORIGIN = None  # Set this to your root path
+PATHRAW = None  # Set this to your raw radar data path
 
 # Validate paths before using them
 if PATHORIGIN is None:
