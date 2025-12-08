@@ -60,6 +60,8 @@ Before training or testing, configure the model in `tools/config.py`:
 - Set `PATHORIGIN` to your data root path
 - Set `PATHRAW` to your raw radar data path
 
+The dataloader currently includes all training participants, including the original validation participant, because the hyperparameters are already optimized and we aim for maximum performance on the held-out test set. If you want to tune your own hyperparameters, remove the validation participant from the training set to restore a proper validation split and track generalization each epoch.
+
 ### 2. Training
 The training data (unfolded sequences) is automatically generated based on specified parameters and directories in `config.py`. Around 1.7 to 2 TB of free disk space should be available. The model is trained using Weights and Biases (wandb). You need to create a wandb account.
 

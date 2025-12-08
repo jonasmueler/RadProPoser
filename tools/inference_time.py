@@ -3,6 +3,7 @@ import sys
 import time
 import torch
 import torch.nn as nn
+from torch.utils.flop_counter import FlopCounterMode
 from config import MODELPATH, SEQLEN
 
 # add model path
@@ -67,8 +68,6 @@ def measure_inference_time(model: nn.Module, input_tensor: torch.Tensor, n_runs:
 
 def count_flops(model: nn.Module, input_tensor: torch.Tensor) -> int:
     """Count FLOPs using PyTorch's flop counter."""
-    from torch.utils.flop_counter import FlopCounterMode
-    
     model.eval()
     with torch.no_grad():
         flop_counter = FlopCounterMode(display=False)
