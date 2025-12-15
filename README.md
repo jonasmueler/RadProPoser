@@ -17,9 +17,6 @@ RadProPoser/
 │   │   ├── README.md  
 ├── models                   
 ├── tools 
-│   ├── calibration_analysis/     # Test results (auto-created)
-│   ├── calibration_plots/        # Calibration plots (auto-created)
-│   └── calibrated_models/        # Recalibration models (auto-created)
 ├── trainedModels 
 ├── requirements.txt             
 
